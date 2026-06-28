@@ -1,0 +1,50 @@
+! btree.hop — Binary tree using pairs
+!
+! Encoding:  empty = []
+!            node  = (left, (value, right))
+
+fun leaf v = ([], (v, []));
+
+fun sumtree [] = 0;
+--- sumtree (l, (v, r)) = sumtree l + v + sumtree r;
+
+fun depth [] = 0;
+--- depth (l, (v, r)) = 1 + (if dl > dr then dl else dr)
+    where dl = depth l
+    where dr = depth r;
+
+fun flatten [] = [];
+--- flatten (l, (v, r)) = flatten l <> [v] <> flatten r;
+
+fun insert(x, []) = leaf x;
+--- insert(x, (l, (v, r))) =
+    if x < v then (insert(x, l), (v, r))
+    else (l, (v, insert(x, r)));
+
+fun fromlist [] = [];
+--- fromlist (x :: xs) = insert(x, fromlist xs);
+
+fun sort xs = flatten(fromlist xs);
+
+! === Tests ===
+
+! Test 1: manual tree
+!        3
+!       / \
+!      1   5
+write "sumtree: "; sumtree (leaf 1, (3, leaf 5));
+write "flatten: "; flatten (leaf 1, (3, leaf 5));
+write "depth:   "; depth (leaf 1, (3, leaf 5));
+
+! Test 2: build BST via insert
+write "\ninsert 1..5: ";
+flatten (insert(4, insert(2, insert(5, insert(1, insert(3, []))))));
+
+! Test 3: tree sort
+write "sort:    "; sort [5, 3, 8, 1, 9, 2, 7];
+
+! Test 4: sum of BST
+write "sum:     "; sumtree (fromlist [10, 20, 30, 40, 50]);
+
+! Test 5: depth of skewed tree (all inserts to right)
+write "depth:   "; depth (fromlist [1, 2, 3, 4, 5]);

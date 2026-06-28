@@ -1,0 +1,147 @@
+! lib.hop — Standard library for hop
+
+! ---- list predicates ----
+fun null [] = 1;
+--- null (_ :: _) = 0;
+
+fun any p [] = 0;
+--- any p (x :: xs) = if p x then 1 else any p xs;
+
+fun all p [] = 1;
+--- all p (x :: xs) = if p x then all p xs else 0;
+
+! ---- basic list operations ----
+fun fst (a, _) = a;
+fun snd (_, b) = b;
+
+fun zip([], _) = [];
+--- zip(_, []) = [];
+--- zip(x :: xs, y :: ys) = (x, y) :: zip(xs, ys);
+
+fun flatten [] = [];
+--- flatten (xs :: xss) = xs <> flatten xss;
+
+fun replicate 0 _ = [];
+--- replicate n x = x :: replicate (n - 1) x;
+
+fun splitAt 0 xs = ([], xs);
+--- splitAt n (x :: xs) = (x :: fst p, snd p) where p = splitAt (n - 1) xs;
+
+fun last (x :: []) = x;
+--- last (_ :: xs) = last xs;
+
+fun init (x :: []) = [];
+--- init (x :: xs) = x :: init xs;
+
+fun take 0 _ = [];
+--- take n (x :: xs) = x :: take (n - 1) xs;
+
+fun drop 0 xs = xs;
+--- drop n (_ :: xs) = drop (n - 1) xs;
+
+fun rev acc [] = acc;
+--- rev acc (x :: xs) = rev (x :: acc) xs;
+fun reverse xs = rev [] xs;
+
+fun nth 0 (x :: _) = x;
+--- nth n (_ :: xs) = nth (n - 1) xs;
+
+! ---- higher-order functions ----
+fun foldr f z [] = z;
+--- foldr f z (x :: xs) = f(x, foldr f z xs);
+
+fun foldl f z [] = z;
+--- foldl f z (x :: xs) = foldl f (f(z, x)) xs;
+
+fun filter p [] = [];
+--- filter p (x :: xs) =
+    if p x then x :: filter p xs else filter p xs;
+
+fun zipwith f [] _ = [];
+--- zipwith f _ [] = [];
+--- zipwith f (x :: xs) (y :: ys) = f(x, y) :: zipwith f xs ys;
+
+fun takewhile p [] = [];
+--- takewhile p (x :: xs) =
+    if p x then x :: takewhile p xs else [];
+
+fun dropwhile p [] = [];
+--- dropwhile p (x :: xs) =
+    if p x then dropwhile p xs else x :: xs;
+
+fun concatmap f [] = [];
+--- concatmap f (x :: xs) = f x <> concatmap f xs;
+
+fun id x = x;
+fun const x _ = x;
+fun compose f g x = f (g x);
+fun flip f a b = f(b, a);
+fun twice f x = f (f x);
+
+fun ntimes 0 f x = x;
+--- ntimes n f x = ntimes (n - 1) f (f x);
+
+! ---- numeric utilities ----
+fun sum xs = foldr (+) 0 xs;
+fun product xs = foldr (*) 1 xs;
+
+fun abs x = if x < 0 then -x else x;
+fun max(a, b) = if a > b then a else b;
+fun min(a, b) = if a < b then a else b;
+
+fun even n = n mod 2 == 0;
+fun odd n = n mod 2 != 0;
+
+fun gcd(a, 0) = a;
+--- gcd(a, b) = gcd(b, a mod b);
+
+! trunc: truncate float to integer using mod's cast-to-long behavior
+fun trunc x = x mod 10000000;
+
+! intdiv: integer division for non-negative a, positive b
+fun intdiv(a, b) = trunc((a - a mod b) / b);
+
+! lerp: linear interpolation
+fun lerp a b t = a + t * (b - a);
+
+! ---- string utilities ----
+fun contains(c, []) = 0;
+--- contains(c, x :: xs) = if c == x then 1 else contains(c, xs);
+
+fun count(c, []) = 0;
+--- count(c, x :: xs) = (if c == x then 1 else 0) + count(c, xs);
+
+fun indexOfH c i [] = 0 - 1;
+--- indexOfH c i (x :: xs) = if c == x then i else indexOfH c (i + 1) xs;
+fun indexOf(c, s) = indexOfH c 0 s;
+
+fun streq([], []) = 1;
+--- streq([], _) = 0;
+--- streq(_, []) = 0;
+--- streq(a :: as, b :: bs) = if a == b then streq(as, bs) else 0;
+
+fun startsWith([], _) = 1;
+--- startsWith(_, []) = 0;
+--- startsWith(a :: as, b :: bs) = if a == b then startsWith(as, bs) else 0;
+
+fun endsWith(suffix, s) = startsWith(reverse suffix, reverse s);
+
+fun isSubstring(needle, []) = if null needle then 1 else 0;
+--- isSubstring(needle, haystack) =
+    if startsWith(needle, haystack) then 1
+    else isSubstring(needle, tail haystack);
+
+fun splitH d acc [] = [reverse acc];
+--- splitH d acc (x :: xs) =
+    if x == d then reverse acc :: splitH d [] xs
+    else splitH d (x :: acc) xs;
+fun split(d, s) = splitH d [] s;
+
+fun join(d, []) = [];
+--- join(d, x :: []) = x;
+--- join(d, x :: xs) = x <> d <> join(d, xs);
+
+! ---- infinite sequences ----
+fun from n = n :: from(n + 1);
+fun repeat x = x :: repeat x;
+fun iterate f x = x :: iterate f (f x);

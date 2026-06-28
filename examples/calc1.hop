@@ -1,0 +1,87 @@
+! calc1.hop — string expression calculator
+! Usage: calc "1+2*(3+4)";
+!
+! Parses an arithmetic expression string and evaluates it.
+! Supports: + - * / ( ) unary minus, multi-digit numbers, spaces.
+!
+! Grammar (recursive descent):
+!   expr   = term (('+' | '-') term)*
+!   term   = factor (('*' | '/') factor)*
+!   factor = number | '(' expr ')' | '-' factor
+
+fun fst (a, _) = a;
+fun snd (_, b) = b;
+fun tail (_ :: xs) = xs;
+
+! character tests
+fun isdigit c = (c >= '0') * (c <= '9');
+fun digitval c = c - '0';
+fun expect(c, c :: rest) = rest; 
+
+! skip whitespace (space, tab)
+fun skip []             = [];
+--- skip (' '  :: rest) = skip rest;
+--- skip ('\t' :: rest) = skip rest;
+--- skip rest           = rest;
+
+! accumulate multi-digit number
+fun pnum(acc, []) = (acc, []);
+--- pnum(acc, c :: rest) =
+    if isdigit c then pnum(acc * 10 + digitval c, rest)
+    else (acc, c :: rest);
+
+! factor:
+fun pfactor ('(' :: rest) =                                                                           
+    (fst r, skip(expect(')', skip(snd r))))
+    where r = pexpr(skip rest); 
+--- pfactor ('-' :: rest) =
+    (0 - fst f, snd f)
+    where f = pfactor(skip rest);
+--- pfactor (c :: rest) =
+    pnum(digitval c, rest);
+
+! term:
+fun trest(acc, '*' :: rest) =
+    trest(acc * fst f, skip(snd f))
+    where f = pfactor(skip rest);
+--- trest(acc, '/' :: rest) =
+    trest(acc / fst f, skip(snd f))
+    where f = pfactor(skip rest);
+--- trest(acc, rest) = (acc, rest);
+
+fun pterm tokens =
+    trest(fst f, skip(snd f))
+    where f = pfactor tokens;
+
+! expr:
+fun erest(acc, '+' :: rest) =
+    erest(acc + fst t, skip(snd t))
+    where t = pterm(skip rest);
+--- erest(acc, '-' :: rest) =
+    erest(acc - fst t, skip(snd t))
+    where t = pterm(skip rest);
+--- erest(acc, rest) = (acc, rest);
+
+fun pexpr tokens =
+    erest(fst t, skip(snd t))
+    where t = pterm tokens;
+
+fun calc tokens = fst(pexpr(skip tokens));
+
+! ===== Tests =====
+
+write "=== String Expression Calculator ===\n\n";
+
+write "calc \"1+2*(3+4)\"     = "; calc "1+2*(3+4)";
+write "calc \"3*4+5\"         = "; calc "3*4+5";
+write "calc \"(1+2)*(3+4)\"   = "; calc "(1+2)*(3+4)";
+write "calc \"10-3-2\"        = "; calc "10-3-2";
+write "calc \"100/10/2\"      = "; calc "100/10/2";
+write "calc \"2*3+4*5\"       = "; calc "2*3+4*5";
+write "calc \"42\"            = "; calc "42";
+write "calc \"((50))\"        = "; calc "((50))";
+write "calc \" 1 + 2  \"      = "; calc " 1 + 2 ";
+write "calc \"123+456\"       = "; calc "123+456";
+write "calc \"-5+3\"          = "; calc "-5+3";
+write "calc \"-(3+4)*2\"      = "; calc "-(3+4)*2";
+write "calc \"10-(6-2)\"      = "; calc "10-(6-2)";

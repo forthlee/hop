@@ -1,0 +1,54 @@
+! ball.hop — Bouncing ball animation
+
+gopen (320, 240);
+
+fun abs x = if x < 0 then 0 - x else x;
+
+! Filled circle
+fun fill cx cy 0 c = 0;
+--- fill cx cy r c = gcircle cx cy r c + fill cx cy (r - 1) c;
+
+! Draw border
+fun border _ =
+    gline 0 0 319 0 16777215 +
+    gline 319 0 319 239 16777215 +
+    gline 319 239 0 239 16777215 +
+    gline 0 239 0 0 16777215;
+
+! Number to string (integer)
+fun itos n = if n < 0 then 45 :: itos (0 - n)
+             else if n < 10 then [48 + n]
+             else itos (n / 10) <> [48 + n mod 10];
+
+! Random initial velocity
+seed = timeseed;
+dx0 = if seed mod 2 == 0 then 3 else 0 - 3;
+dy0 = if (seed / 7) mod 2 == 0 then 2 else 0 - 2;
+
+! Main animation loop
+fun frame x y dx dy =
+    if closed != 0 then 0
+     else if gkey 27 == 1 then 0
+     else frame (x + ndx) (y + ndy) ndx ndy
+    where ndx = if x + dx < 12 then abs dx
+                 else if x + dx > 307 then 0 - abs dx
+                 else dx
+    where ndy = if y + dy < 12 then abs dy
+                 else if y + dy > 227 then 0 - abs dy
+                 else dy
+    where _ = if hitx != 0 then gbeep 880 30
+               else if hity != 0 then gbeep 440 30
+               else 0
+              where hitx = if x + dx < 12 then 1
+                            else if x + dx > 307 then 1 else 0
+              where hity = if y + dy < 12 then 1
+                            else if y + dy > 227 then 1 else 0
+    where _ = gsync 0
+    where closed = gloop 0
+    where _ = gscale 2
+    where _ = gtext 5 218 16777215 (itos x <> [44, 32] <> itos y)
+    where _ = fill x y 10 65280
+    where _ = gclear 0;
+
+write "" (frame 160 120 dx0 dy0);
+gclose 0;

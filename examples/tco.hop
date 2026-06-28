@@ -1,0 +1,57 @@
+! tco.hop — Tail Call Optimisation demo
+!
+! Without TCO, deep tail recursion overflows the C stack (~8MB, ~10,000 frames).
+! With TCO, tail calls become a C goto loop — no stack growth.
+!
+! Limit: arena memory (54MB), not C stack.
+! Each iteration still allocates Val/Env nodes in the arena,
+! so statements reset ~50,000 iterations per top-level statement.
+
+uses lib;
+
+! ---- simple counter ----
+! Without TCO: stack overflow around 10,000.
+! With TCO: runs in O(1) C stack space.
+
+fun loop 0 acc = acc;
+--- loop n acc = loop (n - 1) (acc + 1);
+
+loop 50000 0;   ! 50000
+
+! ---- tail-recursive sum ----
+
+fun sumTo 0 acc = acc;
+--- sumTo n acc = sumTo (n - 1) (acc + n);
+
+sumTo 10000 0;   ! 50005000
+
+! ---- accumulator pattern (reverse) ----
+! Standard reverse uses an accumulator — tail recursive.
+
+reverse (1..1000);   ! [1000, 999, ..., 1]
+
+! ---- foldl: tail-recursive fold ----
+! foldl is tail recursive; foldr is not.
+
+foldl (+) 0 (1..10000);   ! 50005000
+foldl (*) 1 (1..10);      ! 3628800
+
+! ---- mutual tail recursion ----
+
+fun isEven 0 = 1;
+--- isEven n = isOdd (n - 1);
+
+fun isOdd 0 = 0;
+--- isOdd n = isEven (n - 1);
+
+isEven 10000;   ! 1
+isOdd  10001;   ! 1
+
+! ---- non-tail recursion (for contrast) ----
+! fact uses the call stack (n * fact(n-1) is not a tail call).
+! Safe for small n; large n will overflow.
+
+fun fact 0 = 1;
+--- fact n = n * fact (n - 1);
+
+fact 20;   ! 2432902008176640000

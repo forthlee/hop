@@ -1,0 +1,7 @@
+! pascal.hop — Pascal's triangle
+! Each row = pairwise sums of previous row padded with 0s.
+
+fun nextrow row = map (+) ((0 :: row) || (row <> [0]));
+
+write "Pascal's triangle (first 8 rows):\n";
+front(8, rows) whererec rows = [1] :: map nextrow rows;

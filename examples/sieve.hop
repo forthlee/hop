@@ -1,0 +1,14 @@
+! sieve.hop — Sieve of Eratosthenes (lazy)
+
+fun from n = n :: from(n + 1);
+
+fun remove(p, []) = [];
+--- remove(p, x :: xs) =
+    if x mod p == 0 then remove(p, xs)
+    else x :: remove(p, xs);
+
+fun sieve [] = [];
+--- sieve (p :: xs) = p :: sieve(remove(p, xs));
+
+write "First 30 primes:\n";
+front(30, sieve(from 2));

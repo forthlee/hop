@@ -1,0 +1,65 @@
+! queens.hop — N-Queens problem for hop
+!
+! Usage: queens 4;    — all solutions for 4-queens
+!        queens 8;    — all 92 solutions for 8-queens
+!        length (queens 8);
+
+uses lib;
+
+! ---- N-Queens solver ----
+
+fun queens n = solve n n;
+
+fun solve 0 size = [[]];
+--- solve m size = addAll size (solve (m - 1) size);
+
+! for each partial solution, try extending with columns 1..size
+fun addAll size [] = [];
+--- addAll size (p :: ps) = tryCol 1 size p <> addAll size ps;
+
+fun tryCol col size p =
+    if col > size then []
+    else if safe p col then (p <> [col]) :: tryCol (col + 1) size p
+    else tryCol (col + 1) size p;
+
+! ---- Safety check ----
+! Check that placing a queen at column col in the next row
+! does not conflict with any existing queen.
+
+fun safe p col = noAttack 1 p (length p + 1) col;
+
+fun noAttack row [] newRow col = 1;
+--- noAttack row (j :: rest) newRow col =
+    if j == col then 0
+    else if row + j == newRow + col then 0
+    else if row - j == newRow - col then 0
+    else noAttack (row + 1) rest newRow col;
+
+! ---- Board display ----
+
+fun showRow col n size =
+    if col > size then "\n"
+    else (if col == n then "Q " else ". ") <> showRow (col + 1) n size;
+
+fun showBoard size [] = "";
+--- showBoard size (q :: qs) = showRow 1 q size <> showBoard size qs;
+
+fun showSolutions size [] = "";
+--- showSolutions size (s :: ss) =
+    showBoard size s <> "\n" <> showSolutions size ss;
+
+! ===== Demo =====
+
+write "=== N-Queens Problem ===\n\n";
+
+write "4-Queens — all solutions:\n\n";
+write "%s" (showSolutions 4 (queens 4));
+
+write "5-Queens — number of solutions: ";
+length (queens 5);
+
+write "\n\n8-Queens — number of solutions: ";
+length (queens 8);
+
+write "\n\nFirst 8-Queens solution:\n";
+write "%s" (showBoard 8 (head (queens 8)));

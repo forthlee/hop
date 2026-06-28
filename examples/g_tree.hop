@@ -1,0 +1,32 @@
+! tree_demo.hop — Fractal Tree
+! Recursive drawing with gline + sinT/cosT
+uses lib;
+
+rd = pi / 180;
+fun sinT a = sin (a * rd);
+fun cosT a = cos (a * rd);
+
+gopen (640, 480);
+gclear 0;
+gpen 1;
+
+! tree x y len ang spread depth c
+! (x,y)=start, len=branch length, ang=angle(deg), spread=branch angle, depth=recursion depth
+fun tree x y len ang spread 0 c = 0;
+--- tree x y len ang spread depth c =
+    gline x y x2 y2 c +
+    tree x2 y2 (len * 0.7) (ang - spread) spread (depth - 1) c +
+    tree x2 y2 (len * 0.7) (ang + spread) spread (depth - 1) c
+    where y2 = y - len * cosT ang
+    where x2 = x + len * sinT ang;
+
+write "" (tree 320 450 100 0 25 10 65280);
+
+gscale 1;
+gtext 10 10 16777215 "Fractal Tree (depth 10)";
+
+fun loop _ = if gloop 0 == 0
+    then if gkey 27 == 1 then 0 else loop (gsync 0)
+    else 0;
+loop 0;
+gclose 0;

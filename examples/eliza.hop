@@ -1,0 +1,331 @@
+! eliza.hop — ELIZA chatbot for hop
+!
+! Usage:  respond "I feel sad";
+!         respond "Hello";
+
+uses lib;
+
+! ---- helpers ----
+
+fun pick(n, x :: []) = x;
+--- pick(0, x :: _)  = x;
+--- pick(n, _ :: xs) = pick(n - 1, xs);
+
+fun choose(n, lst) = pick(n mod length lst, lst);
+
+! case-insensitive substring check (lowercase both first)
+fun toLower [] = [];
+--- toLower (c :: rest) =
+    if (c >= 'A') * (c <= 'Z') then (c + 32) :: toLower rest
+    else c :: toLower rest;
+
+fun has(kw, input) = isSubstring(kw, toLower input);
+
+! ---- keyword matching and responses ----
+
+fun respond input =
+    if has("goodbye", input) then
+        choose(length input,
+            ["Goodbye. Thank you for talking to me."
+            ,"Goodbye. I hope I have helped you."
+            ,"Goodbye. This was a good session."])
+
+    else if has("sorry", input) then
+        choose(length input,
+            ["Please don't apologize."
+            ,"Apologies are not necessary."
+            ,"How does apologizing make you feel?"])
+
+    else if has("i remember", input) then
+        choose(length input,
+            ["Do you often think of that?"
+            ,"Does thinking of that bring anything else to mind?"
+            ,"What else do you remember?"
+            ,"Why does that come to mind now?"
+            ,"What is the connection to me?"])
+
+    else if has("do you remember", input) then
+        choose(length input,
+            ["Did you think I would forget?"
+            ,"Why do you think I should recall that?"
+            ,"What about it?"
+            ,"You mentioned it -- what about it?"])
+
+    else if has("i dreamt", input) then
+        choose(length input,
+            ["Really -- what does that dream suggest to you?"
+            ,"Have you ever dreamt that before?"
+            ,"How do you feel about that dream in waking life?"])
+
+    else if has("dream", input) then
+        choose(length input,
+            ["What does that dream suggest to you?"
+            ,"Do you dream often?"
+            ,"What persons appear in your dreams?"
+            ,"Do you feel that dream is connected to your problem?"])
+
+    else if has("if ", input) then
+        choose(length input,
+            ["Do you really think it's likely?"
+            ,"Do you wish that were true?"
+            ,"What do you think about it?"
+            ,"Really -- if that happened?"])
+
+    else if has("mother", input) then
+        choose(length input,
+            ["Tell me more about your family."
+            ,"Who else in your family comes to mind?"
+            ,"Your mother -- what does she mean to you?"
+            ,"How does your relationship with your mother affect you?"])
+
+    else if has("father", input) then
+        choose(length input,
+            ["Your father..."
+            ,"Does he influence you strongly?"
+            ,"What else comes to mind when you think of your father?"
+            ,"Tell me more about your father."])
+
+    else if has("i want", input) then
+        choose(length input,
+            ["What would it mean if you got it?"
+            ,"Why do you want it?"
+            ,"Suppose you got it soon -- then what?"
+            ,"What if you never got it?"])
+
+    else if has("i need", input) then
+        choose(length input,
+            ["Why do you need that?"
+            ,"Would it really help you?"
+            ,"Are you sure you need that?"])
+
+    else if has("i am sad", input) then
+        choose(length input,
+            ["I am sorry to hear that you are sad."
+            ,"Do you think coming here will help you not to be sad?"
+            ,"Can you explain what made you sad?"])
+
+    else if has("i am happy", input) then
+        choose(length input,
+            ["How have I helped you to be happy?"
+            ,"What makes you happy just now?"
+            ,"Can you explain why you are suddenly happy?"])
+
+    else if has("i am", input) then
+        choose(length input,
+            ["How long have you been that way?"
+            ,"Do you believe it is normal to be that way?"
+            ,"Do you enjoy being that way?"
+            ,"How do you feel about being that way?"])
+
+    else if has("are you", input) then
+        choose(length input,
+            ["Why are you interested in whether I am or not?"
+            ,"Would you prefer if I were not?"
+            ,"Perhaps I am in your fantasies."
+            ,"Why does it matter to you?"])
+
+    else if has("you are", input) then
+        choose(length input,
+            ["What makes you think I am?"
+            ,"Does it please you to think so?"
+            ,"Do you sometimes wish you were?"
+            ,"Perhaps you would like to be?"])
+
+    else if has("i feel", input) then
+        choose(length input,
+            ["Tell me more about that feeling."
+            ,"Do you often feel that way?"
+            ,"When do you usually feel that way?"
+            ,"Does feeling that way bother you?"])
+
+    else if has("i can't", input) then
+        choose(length input,
+            ["How do you know you can't?"
+            ,"Perhaps you could if you tried."
+            ,"What would it take for you to be able to?"])
+
+    else if has("i don't", input) then
+        choose(length input,
+            ["Why not?"
+            ,"Do you wish you did?"
+            ,"Does that trouble you?"])
+
+    else if has("i think", input) then
+        choose(length input,
+            ["Do you really think so?"
+            ,"But you are not sure?"
+            ,"You are not certain, are you?"])
+
+    else if has("i have", input) then
+        choose(length input,
+            ["How long have you had that?"
+            ,"Why do you tell me that now?"
+            ,"Have you told anyone else?"])
+
+    else if has("i would", input) then
+        choose(length input,
+            ["Could you explain why you would?"
+            ,"Why would you?"
+            ,"Who else knows you would?"])
+
+    else if has("i like", input) then
+        choose(length input,
+            ["Why do you like it?"
+            ,"What is special about it?"
+            ,"Do you like anything else?"])
+
+    else if has("is it", input) then
+        choose(length input,
+            ["Do you think it is?"
+            ,"Perhaps it is -- what do you think?"
+            ,"If it were, what would you do?"
+            ,"It could well be."])
+
+    else if has("because", input) then
+        choose(length input,
+            ["Is that the real reason?"
+            ,"What other reasons come to mind?"
+            ,"Does that reason seem to explain anything else?"])
+
+    else if has("why don't you", input) then
+        choose(length input,
+            ["Do you really think I don't?"
+            ,"Perhaps I will in good time."
+            ,"Should you do it yourself?"])
+
+    else if has("why can't i", input) then
+        choose(length input,
+            ["Do you think you should be able to?"
+            ,"Perhaps you can."
+            ,"What would you do if you could?"])
+
+    else if has("everyone", input) then
+        choose(length input,
+            ["Really, everyone?"
+            ,"Surely not everyone."
+            ,"Can you think of anyone in particular?"
+            ,"Who, for example?"])
+
+    else if has("always", input) then
+        choose(length input,
+            ["Can you think of a specific example?"
+            ,"When?"
+            ,"Really -- always?"])
+
+    else if has("maybe", input) then
+        choose(length input,
+            ["You don't seem quite certain."
+            ,"Perhaps."
+            ,"Why the uncertain tone?"])
+
+    else if has("perhaps", input) then
+        choose(length input,
+            ["You don't seem quite certain."
+            ,"Why the uncertain tone?"
+            ,"Perhaps indeed."])
+
+    else if has("similar", input) then
+        choose(length input,
+            ["In what way?"
+            ,"What resemblance do you see?"])
+
+    else if has("like ", input) then
+        choose(length input,
+            ["In what way?"
+            ,"What resemblance do you see?"
+            ,"What does that similarity mean to you?"])
+
+    else if has("friend", input) then
+        choose(length input,
+            ["Tell me more about your friends."
+            ,"Why do you bring up friends?"
+            ,"Do your friends worry you?"])
+
+    else if has("computer", input) then
+        choose(length input,
+            ["Do computers worry you?"
+            ,"What do you think about machines?"
+            ,"Why do you mention computers?"
+            ,"Do machines have anything to do with your problem?"])
+
+    else if has("lonely", input) then
+        choose(length input,
+            ["Why not go see a friend?"
+            ,"Everyone feels lonely sometimes."
+            ,"You still have me!"])
+
+    else if has("angry", input) then
+        choose(length input,
+            ["What is there to be angry about?"
+            ,"Why are you angry?"
+            ,"Being angry won't solve anything."])
+
+    else if has("what", input) then
+        choose(length input,
+            ["Why do you ask?"
+            ,"Does that question interest you?"
+            ,"What is it you really want to know?"
+            ,"What do you think?"])
+
+    else if has("how", input) then
+        choose(length input,
+            ["How do you suppose?"
+            ,"Perhaps you can answer that yourself."
+            ,"What is it you're really asking?"])
+
+    else if has("hello", input) then
+        choose(length input,
+            ["Hello. I'm Eliza. What's on your mind?"
+            ,"Hi! How are you feeling today?"
+            ,"Hello! Tell me about your problems."])
+
+    else if has("hi", input) then
+        choose(length input,
+            ["Hi! I'm Eliza."
+            ,"Hello!"
+            ,"Hi! Is something troubling you?"])
+
+    else if has("yes", input) then
+        choose(length input,
+            ["You seem quite sure."
+            ,"I see."
+            ,"I understand."])
+
+    else if has("no", input) then
+        choose(length input,
+            ["Why not?"
+            ,"That is a negative response."
+            ,"Are you sure about that?"])
+
+    else
+        choose(length input,
+            ["I see."
+            ,"I'm not sure I understand."
+            ,"What?"
+            ,"Very interesting."
+            ,"Please go on."
+            ,"And then?"
+            ,"How does that make you feel?"
+            ,"Can you elaborate on that?"
+            ,"Tell me more."
+            ,"Really?"
+            ,"Perhaps."
+            ,"Let's change the subject."
+            ,"Could you explain further?"]);
+
+! ===== Demo =====
+
+write "=== ELIZA ===\n\n";
+
+write "you> Hello\n";                       write "ELIZA> %s\n\n" (respond "Hello");
+write "you> I remember my childhood\n";     write "ELIZA> %s\n\n" (respond "I remember my childhood");
+write "you> If it rains tomorrow\n";        write "ELIZA> %s\n\n" (respond "If it rains tomorrow");
+write "you> I dreamt about flying\n";       write "ELIZA> %s\n\n" (respond "I dreamt about flying");
+write "you> I am sorry\n";                  write "ELIZA> %s\n\n" (respond "I am sorry");
+write "you> I need my mother\n";            write "ELIZA> %s\n\n" (respond "I need my mother");
+write "you> I feel very lonely\n";          write "ELIZA> %s\n\n" (respond "I feel very lonely");
+write "you> Maybe you are right\n";         write "ELIZA> %s\n\n" (respond "Maybe you are right");
+write "you> I like computers\n";            write "ELIZA> %s\n\n" (respond "I like computers");
+write "you> Because it is fun\n";           write "ELIZA> %s\n\n" (respond "Because it is fun");
+write "you> I can't do it\n";               write "ELIZA> %s\n\n" (respond "I can't do it");
+write "you> Goodbye\n";                     write "ELIZA> %s\n\n" (respond "Goodbye");

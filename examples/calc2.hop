@@ -1,0 +1,115 @@
+! calc2.hop — two-pass calculator: parse → AST → eval
+! Usage: calc "1+2*(3+4)";
+!
+! Expression representation (tagged pairs, from dif.hop):
+!   (0, n)              — numeric constant n
+!   (2, (op, (e1, e2))) — binary op (op: '+' '-' '*' '/')
+!
+! Grammar (recursive descent):
+!   expr   = term (('+' | '-') term)*
+!   term   = factor (('*' | '/') factor)*
+!   factor = number | '(' expr ')' | '-' factor
+
+uses lib;
+
+! --- Constructors ---
+fun kon n          = (0, n);
+fun mk(op, (a,b)) = (2, (op, (a, b)));
+
+! --- Evaluator ---
+fun eval (0, n) = n;
+--- eval (2, ('+', (a, b))) = eval a + eval b;
+--- eval (2, ('-', (a, b))) = eval a - eval b;
+--- eval (2, ('*', (a, b))) = eval a * eval b;
+--- eval (2, ('/', (a, b))) = eval a / eval b;
+
+! --- Parser helpers ---
+fun isdigit c = (c >= '0') * (c <= '9');
+fun digitval c = c - '0';
+
+fun pskip [] = [];
+--- pskip (' ' :: r) = pskip r;
+--- pskip ('\t' :: r) = pskip r;
+--- pskip r = r;
+
+fun pnum(acc, []) = (kon acc, []);
+--- pnum(acc, c :: r) =
+    if isdigit c then pnum(acc * 10 + digitval c, r)
+    else (kon acc, c :: r);
+
+! --- Parser ---
+fun pfactor ('(' :: r) =
+    (fst res, pskip(tail(pskip(snd res))))
+    where res = pexpr(pskip r);
+--- pfactor ('-' :: r) =
+    (mk('-', (kon 0, fst f)), snd f)
+    where f = pfactor(pskip r);
+--- pfactor (c :: r) =
+    pnum(digitval c, r);
+
+fun pmul tokens = pmul1(fst f, pskip(snd f)) where f = pfactor tokens;
+fun pmul1(acc, '*' :: r) =
+    pmul1(mk('*', (acc, fst f)), pskip(snd f)) where f = pfactor(pskip r);
+--- pmul1(acc, '/' :: r) =
+    pmul1(mk('/', (acc, fst f)), pskip(snd f)) where f = pfactor(pskip r);
+--- pmul1(acc, r) = (acc, r);
+
+fun pexpr tokens = padd1(fst t, pskip(snd t)) where t = pmul tokens;
+fun padd1(acc, '+' :: r) =
+    padd1(mk('+', (acc, fst t)), pskip(snd t)) where t = pmul(pskip r);
+--- padd1(acc, '-' :: r) =
+    padd1(mk('-', (acc, fst t)), pskip(snd t)) where t = pmul(pskip r);
+--- padd1(acc, r) = (acc, r);
+
+fun parse s = fst(pexpr(pskip s));
+
+! --- Display: number to string ---
+fun digitsH(0, acc) = acc;
+--- digitsH(n, acc) = digitsH(intdiv(n, 10), (n mod 10 + '0') :: acc);
+
+fun showNat 0 = "0";
+--- showNat n = digitsH(n, []);
+
+fun showNum n = if n < 0 then '-' :: showNat(0 - n) else showNat n;
+
+! --- Display: expression to infix string ---
+fun showExpr (0, n) = showNum n;
+--- showExpr (2, (op, (e1, e2))) =
+    "(" <> showExpr e1 <> " " <> (op :: []) <> " " <> showExpr e2 <> ")";
+
+! --- Calculator: parse then eval ---
+fun calc s = eval(parse s);
+
+! ===== Tests =====
+
+write "=== Two-Pass Calculator (parse -> AST -> eval) ===\n\n";
+
+write "calc \"1+2*(3+4)\"     = %d\n" (calc "1+2*(3+4)");
+write "calc \"3*4+5\"         = %d\n" (calc "3*4+5");
+write "calc \"(1+2)*(3+4)\"   = %d\n" (calc "(1+2)*(3+4)");
+write "calc \"10-3-2\"        = %d\n" (calc "10-3-2");
+write "calc \"100/10/2\"      = %d\n" (calc "100/10/2");
+write "calc \"2*3+4*5\"       = %d\n" (calc "2*3+4*5");
+write "calc \"42\"            = %d\n" (calc "42");
+write "calc \"((50))\"        = %d\n" (calc "((50))");
+write "calc \" 1 + 2  \"      = %d\n" (calc " 1 + 2 ");
+write "calc \"123+456\"       = %d\n" (calc "123+456");
+write "calc \"-5+3\"          = %d\n" (calc "-5+3");
+write "calc \"-(3+4)*2\"      = %d\n" (calc "-(3+4)*2");
+write "calc \"10-(6-2)\"      = %d\n" (calc "10-(6-2)");
+
+write "\n=== AST construction with mk ===\n\n";
+
+! Direct AST construction and eval
+write "eval mk('+', (kon 1, mk('*', (kon 2, kon 3)))) = %d\n"
+    (eval(mk('+', (kon 1, mk('*', (kon 2, kon 3))))));
+write "eval mk('*', (mk('+', (kon 1, kon 2)), mk('+', (kon 3, kon 4)))) = %d\n"
+    (eval(mk('*', (mk('+', (kon 1, kon 2)), mk('+', (kon 3, kon 4))))));
+
+write "\n=== showExpr (AST to string) ===\n\n";
+
+write "showExpr(parse \"1+2*3\")       = %s\n" (showExpr(parse "1+2*3"));
+write "showExpr(parse \"(1+2)*(3+4)\") = %s\n" (showExpr(parse "(1+2)*(3+4)"));
+write "showExpr(parse \"-5+3\")        = %s\n" (showExpr(parse "-5+3"));
+write "showExpr(mk('+', (kon 10, mk('*', (kon 3, kon 4))))) = %s\n"
+    (showExpr(mk('+', (kon 10, mk('*', (kon 3, kon 4))))));

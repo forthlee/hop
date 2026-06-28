@@ -1,0 +1,98 @@
+! g_gui.hop — Tests all gui.hop components
+!
+! Components exercised:
+!   guiLabel, guiNumStr
+!   guiSlider, guiSliderHit, guiSliderVal   (two sliders)
+!   guiButton, guiButtonDown, guiButtonClick (press highlight + click action)
+!   guiInput,  guiInputKey                  (keyboard via gkeyevent)
+!
+! Interactions:
+!   Drag "Speed" slider  → value 0-100
+!   Drag "Volume" slider → value 0-10
+!   Type in input field  → Backspace to delete chars
+!   Click [Clear]        → save input to Text, reset input field
+!   ESC                  → quit
+
+uses lib;
+uses gui;
+
+! ---- window ----
+! At gscale 2: char advance = guiCharW = 12 px, glyph height = guiCharH = 14 px
+winW = 520;
+winH = 285;
+gopen (winW, winH);
+gtitle "gui demo";
+
+! ---- slider geometry ----
+! slX0=100 clears the widest label "Volume:" (7 chars × 12 = 84 px from x=5)
+slX0 = 100;  slX1 = 460;
+slY1 =  62;  ! Speed
+slY2 = 102;  ! Volume
+
+! ---- input + button geometry ----
+! Input field height = guiCharH + 8 = 22 px
+inpX = 100;  inpY = 136;  inpW = 250;
+btnX = 362;  btnY = 134;  btnW = 90;  btnH = 26;
+
+! ---- Text row (below input) ----
+txtY = 175;
+
+! ---- initial state ----
+initSpeed = 50;
+initVol   = 5;
+initBuf   = [];
+initTxt   = [];
+
+! ---- frame loop ----
+! State: (speed, vol, buf, btnPrev, txt, t)
+!
+! where-clause evaluation order: last in source = first evaluated
+!   mouse inputs → hit tests → new values → gclear → draw → gloop → gsync
+fun frame speed vol buf btnPrev txt t =
+    if closed != 0 then 0
+     else if gkey 27 == 1 then 0
+     else frame speed2 vol2 buf2 btnDown txt2 (t + 1)
+    where _ = gsync 0
+    where closed = gloop 0
+    ! ---- hint (scale 1 to fit in one line) ----
+    where _ = guiLabel 5 268 guiGray "Drag sliders | type in field | click Clear | ESC=quit"
+    where _ = gscale 1
+    ! ---- status (scale 2) ----
+    where _ = gscale 2
+    where _ = guiLabel 280 228 11184810 "Vol:"
+    where _ = guiLabel 340 228 guiWhite (guiNumStr vol2)
+    where _ = guiLabel   5 228 11184810 "Speed:"
+    where _ = guiLabel  89 228 guiWhite (guiNumStr speed2)
+    ! ---- text row ----
+    where _ = guiLabel inpX txtY guiWhite txt
+    where _ = guiLabel 5 txtY 11184810 "Text:"
+    ! ---- input row ----
+    where _ = guiButton btnX btnY btnW btnH btnCol "Clear"
+    where _ = guiLabel 5 (inpY + 4) 11184810 "Input:"
+    where _ = guiInput inpX inpY inpW guiGray buf
+    ! ---- sliders ----
+    where _ = guiSlider slX0 slX1 slY2 0 10 vol2
+    where _ = guiLabel 5 slY2 11184810 "Volume:"
+    where _ = guiSlider slX0 slX1 slY1 0 100 speed2
+    where _ = guiLabel 5 slY1 11184810 "Speed:"
+    ! ---- title ----
+    where _ = guiLabel (intdiv(winW - 240, 2)) 20 guiWhite "=== GUI Demo ==="
+    where _ = gscale 2
+    where _ = gclear 0
+    ! ---- state updates ----
+    where txt2     = if btnClick then buf else txt
+    where btnCol   = if btnDown then 5592405 else guiBlue
+    where buf2     = if btnClick then [] else guiInputKey buf k
+    where btnClick = guiButtonClick btnX btnY btnW btnH mx my clicked btnPrev
+    where btnDown  = guiButtonDown  btnX btnY btnW btnH mx my clicked
+    where speed2   = if slHit1 then guiSliderVal slX0 slX1 0 100 mx else speed
+    where vol2     = if slHit2 then guiSliderVal slX0 slX1 0 10  mx else vol
+    where slHit1   = guiSliderHit slX0 slX1 slY1 mx my clicked
+    where slHit2   = guiSliderHit slX0 slX1 slY2 mx my clicked
+    where k        = gkeyevent 0
+    where clicked  = gclick 0 > 0
+    where my = snd (gmouse 0)
+    where mx = fst (gmouse 0);
+
+write "" (frame initSpeed initVol initBuf 0 initTxt 0);
+gclose 0;

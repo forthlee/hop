@@ -1,0 +1,26 @@
+! collatz.hop — Collatz conjecture
+! Even -> n/2,  Odd -> 3n+1.  Conjecture: always reaches 1.
+
+! uses range;
+
+fun next n = if n mod 2 == 0 then n / 2 else 3 * n + 1;
+
+fun collatz 1 = [1];
+--- collatz n = n :: collatz(next n);
+
+fun len [] = 0;
+--- len (_ :: xs) = 1 + len xs;
+
+write "collatz 6:  "; collatz 6;
+write "collatz 27: "; collatz 27;
+write "length:     "; len(collatz 27);
+
+! find the number with the longest sequence in 1..30
+fun longer(a, b) = if len a > len b then a else b;
+
+fun longest [] = [];
+--- longest (x :: xs) = longer(collatz x, longest xs);
+
+write "\nlongest in 1..30:\n";
+longest(1..30);
+write "length: "; len(longest(1..30));

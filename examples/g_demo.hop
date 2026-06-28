@@ -1,0 +1,18 @@
+gopen (320, 240);
+gclear 0;
+
+gline 0 0 319 239 16777215;
+gline 319 0 0 239 16777215;
+gcircle 160 120 60 16711680;
+gtext 100 20 65280 "Hello, Hope!";
+gcircle 80 180 30 255;
+
+gloop 0;
+gsync 0;
+
+fun loop _ = if gloop 0 == 0
+    then if gkey 27 == 1 then 0 else loop (gsync 0)
+    else 0;
+
+loop 0;
+gclose 0;

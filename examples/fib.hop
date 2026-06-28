@@ -1,0 +1,12 @@
+! fib.hop — Fibonacci via lazy infinite stream
+!
+! fib = [0, 1, 1, 2, 3, 5, 8, 13, ...]
+! Each element is a thunk, computed once on first access.
+
+fun add (a, b) = a + b;
+
+fib = 0 :: 1 :: map add (fib || tail fib);
+
+n = 40;
+
+write "fib(%d) = %d\n" n (nth n fib);

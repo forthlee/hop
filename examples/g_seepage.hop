@@ -1,0 +1,95 @@
+! g_seepage.hop — Seepage / percolation model with interactive density slider
+!
+! Cell states: 0=empty(black)  1=green(tree)  2=red(wet)
+!
+! Rule (von Neumann 4-neighbourhood):
+!   green cell with ≥1 red neighbour → becomes red
+!   red and empty cells never change
+!
+! Critical density ≈ 59%.  Drag the slider to explore.
+! Controls: drag slider = change density + reset;  Space = reset;  ESC = quit
+
+uses lib;
+uses gui;
+
+! ---- grid and window ----
+w = 80;
+h = 60;
+S = 8;
+winH = h * S + 30;
+
+gopen (w * S, winH);
+gtitle "Seepage Model";
+
+! ---- slider geometry ----
+sliderY = h * S + 15;
+trackX0 = 65;
+trackX1 = w * S - 10;
+
+! ---- cell access; out-of-bounds = empty ----
+fun cellAt x y board =
+    if (x >= 0) * (x < w) * (y >= 0) * (y < h)
+    then aget (y * w + x) board
+    else 0;
+
+! ---- any red von-Neumann neighbour? ----
+fun hasRed x y board =
+    (if cellAt (x-1) y    board == 2 then 1 else 0) +
+    (if cellAt (x+1) y    board == 2 then 1 else 0) +
+    (if cellAt  x   (y-1) board == 2 then 1 else 0) +
+    (if cellAt  x   (y+1) board == 2 then 1 else 0);
+
+! ---- next state for one cell ----
+fun nextCell x y board =
+    if cur != 1 then cur
+     else if hasRed x y board > 0 then 2
+     else 1
+    where cur = cellAt x y board;
+
+! ---- build next generation ----
+fun stepH i board =
+    if i >= w * h then []
+    else nextCell (i mod w) ((i - i mod w) / w) board :: stepH (i + 1) board;
+fun step board = array (stepH 0 board);
+
+! ---- per-cell colour (for gdrawcol) ----
+fun cellColor 0 = 0;         ! black  (empty)
+--- cellColor 1 = 43520;     ! green  (tree)
+--- cellColor _ = 16711680;  ! red    (wet)
+
+! ---- initial board at density d (left column always red) ----
+fun mkBoardH i d =
+    if i >= w * h then []
+    else cell :: mkBoardH (i + 1) d
+    where cell = if (i mod w) == 0 then 2
+                  else if rand 0 mod 100 < d then 1
+                  else 0;
+fun mkBoard d = array (mkBoardH 0 d) where _ = srand timeseed;
+
+! ---- animation loop ----
+! where-clause order (last in source = outermost = first evaluated):
+!   mx/my → inSlider/newD → gclear → gdrawcol → drawSlider → gloop → gsync
+fun frame board d t =
+    if closed != 0 then 0
+     else if gkey 27 == 1 then 0
+     else if inSlider then frame (mkBoard newD) newD (t + 1)
+     else if gkey 32 == 1 then frame (mkBoard d) d (t + 1)
+     else frame (step board) d (t + 1)
+    where _ = gsync 0
+    where closed = gloop 0
+    where _ = guiSlider trackX0 trackX1 sliderY 1 100 d
+    where _ = guiLabel 5 (sliderY - 4) 11184810 "density:"
+    where _ = gscale 1
+    where _ = gdrawcol (w, (h, (S, amap cellColor board)))
+    where _ = gclear 0
+    where inSlider = guiSliderHit trackX0 trackX1 sliderY mx my clicked
+    where newD = guiSliderVal trackX0 trackX1 1 100 mx
+    where clicked = gclick 0 > 0
+    where my = snd (gmouse 0)
+    where mx = fst (gmouse 0);
+
+initD = 55;
+initBoard = mkBoard initD;
+
+write "" (frame initBoard initD 0);
+gclose 0;

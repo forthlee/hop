@@ -1,0 +1,121 @@
+! uses lists, range;
+
+n = 10;
+
+lst = 1::1::map (+) (1..n || 2..n+1);
+
+lst;
+
+write "Hello world\n";
+write "%s\n" "Hello world";
+write "%v\n" "Hello world";
+write "%v\n" ["Hello world"];
+write "%v\n" ["Hello", "world", '\n'];
+
+fun double1 x  = 2 * x;
+fun double2(x) = 2 * x;
+
+write "double1 2  = %d\n" (double1 2);
+write "double2 2  = %d\n" (double2 2);
+write "double1(2) = %d\n" (double1(2));
+write "double2(2) = %d\n" (double2(2));
+
+x = [1,2,3,4];
+y = ["abc", "def", 123, 456];
+
+write " x = %v\n" x;
+write " y = %v\n" y;
+
+! ---- string list examples ----
+
+uses lib;
+
+! strings are lists of char codes
+hello = "Hello";
+write "hello = %v\n" hello;
+write "length = %d\n" (length hello);
+
+! head / tail on strings
+write "head = %c, tail = %v\n" (head hello) (tail hello);
+
+! reverse a string
+write "reverse = %v\n" (reverse hello);
+
+! concatenation
+write "concat = %v\n" ("Hello" <> " " <> "World");
+
+! map: shift each char by 1 (Caesar cipher)
+write "shifted = %v\n" (map succ "HAL");
+
+! filter: keep only lowercase letters
+fun isLower c = c >= 97;
+write "lower only = %v\n" (filter isLower "Hello World");
+
+! take / drop on strings
+write "take 3 = %v\n" (take 3 "abcdef");
+write "drop 3 = %v\n" (drop 3 "abcdef");
+
+! list of strings operations
+words = ["apple", "banana", "cherry"];
+write "words = %v\n" words;
+write "head word = %v\n" (head words);
+write "map length = %v\n" (map length words);
+write "map reverse = %v\n" (map reverse words);
+
+! ---- string/char search & comparison ----
+
+! all string functions now come from lib via "uses lib"
+
+write "contains 'l' in Hello = %d\n" (contains('l', "Hello"));
+write "contains 'z' in Hello = %d\n" (contains('z', "Hello"));
+
+write "count 'l' in Hello = %d\n" (count('l', "Hello"));
+write "count 'a' in banana = %d\n" (count('a', "banana"));
+
+write "indexOf 'l' in Hello = %d\n" (indexOf('l', "Hello"));
+write "indexOf 'o' in Hello = %d\n" (indexOf('o', "Hello"));
+write "indexOf 'z' in Hello = %d\n" (indexOf('z', "Hello"));
+
+write "streq Hello Hello = %d\n" (streq("Hello", "Hello"));
+write "streq Hello World = %d\n" (streq("Hello", "World"));
+write "streq Hi High = %d\n" (streq("Hi", "High"));
+
+write "startsWith He Hello = %d\n" (startsWith("He", "Hello"));
+write "startsWith Hi Hello = %d\n" (startsWith("Hi", "Hello"));
+
+write "endsWith lo Hello = %d\n" (endsWith("lo", "Hello"));
+write "endsWith la Hello = %d\n" (endsWith("la", "Hello"));
+
+write "isSubstring llo Hello = %d\n" (isSubstring("llo", "Hello"));
+write "isSubstring abc Hello = %d\n" (isSubstring("abc", "Hello"));
+write "isSubstring nan banana = %d\n" (isSubstring("nan", "banana"));
+
+fun hasA s = contains('a', s);
+write "words with 'a' = %v\n" (filter hasA words);
+
+! ---- split & join ----
+
+! split by comma (44)
+write "split by ',' = %v\n" (split(',', "hello,world,foo"));
+
+! split by space
+write "split by ' ' = %v\n" (split(' ', "one two three"));
+
+! split by colon
+path = "usr:bin:local:sbin";
+write "split path = %v\n" (split(':', path));
+
+! split then rejoin with different delimiter
+write "rejoin with '/' = %v\n" (join("/", split(':', path)));
+
+! split + map: trim-like processing
+csv = "10,20,30,40";
+write "csv fields = %v\n" (split(',', csv));
+write "csv length = %d\n" (length (split(',', csv)));
+
+! split empty segments
+write "split a::b = %v\n" (split(':', "a::b"));
+
+! round-trip: join(d, split(d, s)) == s
+msg = "hello world";
+write "round-trip = %v\n" (join(" ", split(' ', msg)));

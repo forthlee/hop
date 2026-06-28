@@ -1,0 +1,106 @@
+! prolog.hop — Prolog-style reasoning in hop
+!
+! Key insight: Prolog's backtracking = list of solutions
+!   Success    → non-empty list
+!   Failure    → []
+!   A, B       → concatmap B (results of A)   (conjunction)
+!   A ; B      → A <> B                       (disjunction)
+!   \+ A       → null(results of A)           (negation as failure)
+
+uses lib;
+
+! ══ Fact database (using strings directly) ══
+!
+!   parent(tom, bob).  parent(tom, liz).
+!   parent(bob, ann).  parent(bob, pat).
+!   male(tom). male(bob).
+!   female(liz). female(ann). female(pat).
+
+fun parent_db = [("tom","bob"), ("tom","liz"), ("bob","ann"), ("bob","pat")];
+fun male_db   = ["tom", "bob"];
+fun female_db = ["liz", "ann", "pat"];
+
+! ══ Helpers (streq-based) ══
+
+fun elem(_, []) = 0;
+--- elem(x, y :: ys) = if streq(x, y) then 1 else elem(x, ys);
+
+fun remove(_, []) = [];
+--- remove(x, y :: ys) =
+    if streq(x, y) then remove(x, ys) else y :: remove(x, ys);
+
+fun unique [] = [];
+--- unique (x :: xs) =
+    if elem(x, xs) then unique xs else x :: unique xs;
+
+! ══ Base predicates ══
+
+! children(X) = ?- parent(X, Y).    → list of Y
+fun children_in(_, []) = [];
+--- children_in(x, (p, c) :: rest) =
+    if streq(p, x) then c :: children_in(x, rest)
+    else children_in(x, rest);
+fun children x = children_in(x, parent_db);
+
+! parents(Y) = ?- parent(X, Y).     → list of X
+fun parents_in(_, []) = [];
+--- parents_in(y, (p, c) :: rest) =
+    if streq(c, y) then p :: parents_in(y, rest)
+    else parents_in(y, rest);
+fun parents x = parents_in(x, parent_db);
+
+fun male   x = elem(x, male_db);
+fun female x = elem(x, female_db);
+
+! ══ Derived rules ══
+
+! grandparent(X, Z) :- parent(X, Y), parent(Y, Z).
+fun grandchildren x = concatmap children (children x);
+fun grandparents  x = concatmap parents  (parents x);
+
+! sibling(X, Y) :- parent(Z, X), parent(Z, Y), X \= Y.
+fun siblings x = unique(remove(x, concatmap children (parents x)));
+
+! ancestor(X, Y) :- parent(X, Y).
+! ancestor(X, Y) :- parent(X, Z), ancestor(Z, Y).
+fun descendants x = children x <> concatmap descendants (children x);
+
+! uncle_aunt(U, X) :- parent(P, X), sibling(P, U).
+fun uncles_aunts x = unique(concatmap siblings (parents x));
+
+! brother(X, Y) :- sibling(X, Y), male(X).
+fun brothers x = filter male (siblings x);
+
+! sister(X, Y) :- sibling(X, Y), female(X).
+fun sisters x = filter female (siblings x);
+
+! ══ Queries ══
+
+write "=== Prolog-style Reasoning ===\n\n";
+
+write "Family tree:\n";
+write "  tom -+- bob -+- ann\n";
+write "       |       +- pat\n";
+write "       +- liz\n\n";
+
+write "?- parent(tom, X).       %v\n" (children "tom");
+write "?- parent(bob, X).       %v\n" (children "bob");
+write "?- parent(X, ann).       %v\n" (parents "ann");
+write "?- grandparent(tom, X).  %v\n" (grandchildren "tom");
+write "?- grandparent(X, ann).  %v\n" (grandparents "ann");
+write "?- sibling(ann, X).      %v\n" (siblings "ann");
+write "?- sibling(bob, X).      %v\n" (siblings "bob");
+write "?- ancestor(tom, X).     %v\n" (descendants "tom");
+write "?- uncle_aunt(X, ann).   %v\n" (uncles_aunts "ann");
+write "?- brother(liz, X).      %v\n" (brothers "liz");
+write "?- sister(bob, X).       %v\n" (sisters "bob");
+
+write "\n! Conjunction: parent(tom, X), female(X).\n";
+write "?- tom's daughters:      %v\n" (filter female (children "tom"));
+
+write "\n! Disjunction: parent(tom, X) ; parent(bob, X).\n";
+write "?- tom|bob's children:   %v\n" (children "tom" <> children "bob");
+
+write "\n! Negation as failure: parent(tom, X), \\+ male(X).\n";
+fun notmale x = 1 - male x;
+write "?- tom's non-male kids:  %v\n" (filter notmale (children "tom"));

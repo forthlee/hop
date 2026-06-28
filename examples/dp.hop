@@ -1,0 +1,119 @@
+! dp.hop — Classic Dynamic Programming examples
+! Demonstrates bottom-up DP with arrays in hop.
+
+uses lib;
+
+! ============================================================
+! 1. Longest Increasing Subsequence (LIS) — O(n^2)
+! ============================================================
+! dp[i] = length of LIS ending at index i
+! dp[i] = 1 + max(dp[j]) for all j < i where a[j] < a[i]
+
+fun lisMax a dp i j =
+    if j >= i then 0
+    else if aget j a < aget i a then max(aget j dp, lisMax a dp i (j + 1))
+    else lisMax a dp i (j + 1);
+
+fun buildLIS a dp i n =
+    if i >= n then dp
+    else buildLIS a (aset i (lisMax a dp i 0 + 1) dp) (i + 1) n;
+
+fun lisResult dp i n best =
+    if i >= n then best
+    else lisResult dp (i + 1) n (max(best, aget i dp));
+
+fun lis lst = lisResult dp 0 n 0
+    where dp = buildLIS a (amake n 0) 0 n
+    where a = array lst
+    where n = length lst;
+
+write "=== LIS (Longest Increasing Subsequence) ===\n";
+write "[10,9,2,5,3,7,101,18]: %d\n" (lis [10, 9, 2, 5, 3, 7, 101, 18]);
+write "[0,1,0,3,2,3]:         %d\n" (lis [0, 1, 0, 3, 2, 3]);
+write "[7,7,7,7]:             %d\n" (lis [7, 7, 7, 7]);
+
+! ============================================================
+! 2. Coin Change — minimum coins to make amount
+! ============================================================
+! dp[0] = 0, dp[i] = min(dp[i-c] + 1) over all coins c <= i
+
+fun bestCoin dp i [] = 99999;
+--- bestCoin dp i (c :: cs) =
+    if c <= i then min(aget (i - c) dp + 1, bestCoin dp i cs)
+    else bestCoin dp i cs;
+
+fun buildCoinDP coins dp i amount =
+    if i > amount then dp
+    else buildCoinDP coins (aset i (bestCoin dp i coins) dp) (i + 1) amount;
+
+fun coinChange coins amount =
+    aget amount (buildCoinDP coins (aset 0 0 (amake (amount + 1) 99999)) 1 amount);
+
+write "\n=== Coin Change (min coins) ===\n";
+write "coins=[1,5,10,25], amount=63: %d coins\n" (coinChange [1, 5, 10, 25] 63);
+write "coins=[1,3,4],     amount=6:  %d coins\n" (coinChange [1, 3, 4] 6);
+write "coins=[1,5,10],    amount=27: %d coins\n" (coinChange [1, 5, 10] 27);
+
+! ============================================================
+! 3. 0/1 Knapsack — max value within weight limit
+! ============================================================
+! 1D DP: for each item, scan capacities backward.
+! Immutable arrays make this naturally correct —
+! smaller indices still hold values from before this item.
+
+fun applyItem w v dp cap =
+    if cap < w then dp
+    else applyItem w v (aset cap (max(aget cap dp, aget (cap - w) dp + v)) dp) (cap - 1);
+
+fun ksLoop capW dp [] = dp;
+--- ksLoop capW dp (item :: items) =
+    ksLoop capW (applyItem (fst item) (snd item) dp capW) items;
+
+fun knapsack items capW =
+    aget capW (ksLoop capW (amake (capW + 1) 0) items);
+
+write "\n=== 0/1 Knapsack ===\n";
+write "items=[(2,3),(3,4),(4,5),(5,6)], W=8:  %d\n"
+    (knapsack [(2, 3), (3, 4), (4, 5), (5, 6)] 8);
+write "items=[(1,1),(3,4),(4,5),(5,7)], W=7:  %d\n"
+    (knapsack [(1, 1), (3, 4), (4, 5), (5, 7)] 7);
+
+! ============================================================
+! 4. Weighted Job Scheduling — max profit, non-overlapping
+! ============================================================
+! Jobs sorted by end time: [(start, (end, profit)), ...]
+! dp[i] = max profit considering jobs 0..i
+! dp[i] = max(dp[i-1], profit[i] + dp[lastCompatible(i)])
+
+fun jend x = fst (snd x);
+fun jpro x = snd (snd x);
+
+fun lastCompat ea si j =
+    if j < 0 then 0 - 1
+    else if aget j ea <= si then j
+    else lastCompat ea si (j - 1);
+
+fun buildJDP sa ea wa dp i n =
+    if i >= n then dp
+    else buildJDP sa ea wa
+        (aset i (max(prev, aget i wa + (if lc >= 0 then aget lc dp else 0))) dp)
+        (i + 1) n
+    where lc = lastCompat ea (aget i sa) (i - 1)
+    where prev = if i > 0 then aget (i - 1) dp else 0;
+
+fun dpMax dp i n best =
+    if i >= n then best
+    else dpMax dp (i + 1) n (max(best, aget i dp));
+
+fun jobSched jobs = dpMax dp 0 n 0
+    where dp = buildJDP sa ea wa (amake n 0) 0 n
+    where sa = array (map fst jobs)
+    where ea = array (map jend jobs)
+    where wa = array (map jpro jobs)
+    where n = length jobs;
+
+write "\n=== Weighted Job Scheduling ===\n";
+write "[(1,(3,50)),(2,(4,10)),(3,(5,40)),(3,(6,70))]: %d\n"
+    (jobSched [(1, (3, 50)), (2, (4, 10)), (3, (5, 40)), (3, (6, 70))]);
+write "[(1,(3,5)),(2,(5,6)),(4,(6,5)),(6,(7,4)),(5,(8,11)),(7,(9,2))]: %d\n"
+    (jobSched [(1, (3, 5)), (2, (5, 6)), (4, (6, 5)), (6, (7, 4)), (5, (8, 11)), (7, (9, 2))]);

@@ -1,0 +1,74 @@
+! random.hop — Random number generation with lazy lists
+!
+! Uses a linear congruential generator:
+!   next = (77 * seed + 1) mod 1024
+!
+! Usage: front(20, randoms timeseed);
+!        isort (front(50, randoms timeseed));
+
+uses lib;
+
+! ---- iterate: infinite lazy list by repeated application ----
+
+fun iterate f x = x :: iterate f (f x);
+
+! ---- LCG random number generator ----
+
+fun nextRand seed = (77 * seed + 1) mod 1024;
+
+fun randoms seed = iterate nextRand (nextRand seed);
+
+! ---- insertion sort ----
+
+fun isort [] = [];
+--- isort (x :: xs) = insert x (isort xs);
+
+fun insert x [] = [x];
+--- insert x (y :: ys) =
+    if x <= y then x :: y :: ys
+    else y :: insert x ys;
+
+! ---- adjacent pairs ----
+
+fun adjs xs = xs || tail xs;
+
+! ---- differences between adjacent elements ----
+
+fun diffs xs = map diff (adjs xs);
+fun diff (a, b) = b - a;
+
+! ---- statistics ----
+
+fun minL (x :: []) = x;
+--- minL (x :: xs) = (if x < m then x else m) where m = minL xs;
+
+fun maxL (x :: []) = x;
+--- maxL (x :: xs) = (if x > m then x else m) where m = maxL xs;
+
+! ===== Demo =====
+
+seed = timeseed;
+rng = randoms seed;
+
+write "=== Random Numbers ===\n";
+write "LCG: next = (77 * seed + 1) mod 1024\n";
+write "Seed: %d\n\n" seed;
+
+write "First 20 random numbers:\n";
+front(20, rng);
+
+write "\n\nSorted:\n";
+isort (front(20, rng));
+
+write "\n\nFirst 10 adjacent pairs:\n";
+front(10, adjs rng);
+
+write "\n\n50 random numbers, sorted:\n";
+isort (front(50, rng));
+
+write "\n\nDifferences between adjacent sorted values:\n";
+diffs (isort (front(50, rng)));
+
+write "\n\nMin: ";  minL (front(100, rng));
+write "\nMax: ";    maxL (front(100, rng));
+write "\n";

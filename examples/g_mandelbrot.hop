@@ -1,0 +1,108 @@
+! mandelbrot.hop — Interactive Mandelbrot set explorer
+!
+! Click and drag to select a square region, release to zoom in.
+! Press 'r' or SPACE to reset to initial view.
+! Press ESC to quit.
+
+S = 3;
+W = 160;
+H = 120;
+MAXITER = 32;
+gopen (W * S, H * S);
+gpen S;
+
+fun min a b = if a < b then a else b;
+fun max a b = if a > b then a else b;
+fun abs x = if x < 0 then 0 - x else x;
+
+! Mandelbrot iteration: returns iteration count (0 = in set)
+fun mandel cx cy zx zy i =
+    if i >= MAXITER then 0
+    else if zx * zx + zy * zy > 4.0 then i
+    else mandel cx cy (zx * zx - zy * zy + cx) (2.0 * zx * zy + cy) (i + 1);
+
+! Color palette: map iteration count to RGB
+fun palette 0 = 0;
+--- palette n = r * 65536 + g * 256 + b
+    where r = (n * 7 + 100) mod 256
+    where g = (n * 13 + 50) mod 256
+    where b = (n * 23 + 150) mod 256;
+
+! Plot a scaled pixel using gline (gpen makes it S pixels wide)
+fun splot px py c = gline (px * S + S / 2) (py * S) (px * S + S / 2) (py * S + S - 1) c;
+
+! Render one row of pixels
+fun renderRow px py xmin dx cy =
+    if px >= W then 0
+    else splot px py (palette (mandel cx cy 0.0 0.0 0)) +
+         renderRow (px + 1) py xmin dx cy
+    where cx = xmin + dx * px;
+
+! Render all rows
+fun renderAll py xmin dx ymin dy =
+    if py >= H then 0
+    else renderRow 0 py xmin dx (ymin + dy * py) +
+         renderAll (py + 1) xmin dx ymin dy;
+
+! Convert screen pixel to complex coordinate
+fun px2cx px xmin xmax = xmin + (xmax - xmin) * px / (W * S);
+fun py2cy py ymin ymax = ymin + (ymax - ymin) * py / (H * S);
+
+! Draw white square outline (screen coords)
+fun drawSquare x0 y0 x1 y1 =
+    gline lx ly rx ly 16777215 +
+    gline rx ly rx ry 16777215 +
+    gline rx ry lx ry 16777215 +
+    gline lx ry lx ly 16777215
+    where lx = min x0 x1
+    where ly = min y0 y1
+    where rx = min x0 x1 + side
+    where ry = min y0 y1 + side
+    where side = max (abs (x1 - x0)) (abs (y1 - y0));
+
+! Idle: wait for mouse click or key
+fun idle xmin xmax ymin ymax =
+    if closed != 0 then 0
+     else if gkey 27 == 1 then 0
+     else if gkey 32 == 1 then render (0 - 2.0) 1.0 (0 - 1.125) 1.125
+     else if gkey 82 == 1 then render (0 - 2.0) 1.0 (0 - 1.125) 1.125
+     else if btn == 1 then drag xmin xmax ymin ymax mx my
+     else idle xmin xmax ymin ymax
+    where _ = gsync 0
+    where closed = gloop 0
+    where (mx, my) = gmouse 0
+    where btn = gclick 0;
+
+! Drag: show square, wait for mouse release
+fun drag xmin xmax ymin ymax sx sy =
+    if closed != 0 then 0
+     else if gkey 27 == 1 then 0
+     else if btn == 0 then zoom xmin xmax ymin ymax sx sy mx my
+     else drag xmin xmax ymin ymax sx sy
+    where _ = gsync 0
+    where closed = gloop 0
+    where _ = drawSquare sx sy mx my
+    where _ = grestore 0
+    where (mx, my) = gmouse 0
+    where btn = gclick 0;
+
+! Compute new viewport from square selection and render
+fun zoom xmin xmax ymin ymax sx sy ex ey =
+    if side < 5 then idle xmin xmax ymin ymax
+     else render nxmin nxmax nymin nymax
+    where nxmin = px2cx lx xmin xmax
+    where nxmax = px2cx (lx + side) xmin xmax
+    where nymin = py2cy ly ymin ymax
+    where nymax = py2cy (ly + side) ymin ymax
+    where lx = min sx ex
+    where ly = min sy ey
+    where side = max (abs (ex - sx)) (abs (ey - sy));
+
+! Render and enter idle
+fun render xmin xmax ymin ymax =
+    idle xmin xmax ymin ymax
+    where _ = gsave 0
+    where _ = renderAll 0 xmin ((xmax - xmin) / W) ymin ((ymax - ymin) / H);
+
+render (0 - 2.0) 1.0 (0 - 1.125) 1.125;
+gclose 0;

@@ -1,0 +1,18 @@
+! hamming.hop — Hamming numbers (regular numbers)
+! Numbers whose only prime factors are 2, 3, and 5:
+!   1, 2, 3, 4, 5, 6, 8, 9, 10, 12, 15, 16, 18, 20, ...
+
+fun double n = 2 * n;
+fun triple n = 3 * n;
+fun times5 n = 5 * n;
+
+fun merge(x :: xs, y :: ys) =
+    if x < y then x :: merge(xs, y :: ys)
+    else if x > y then y :: merge(x :: xs, ys)
+    else x :: merge(xs, ys);
+
+write "First 20 Hamming numbers:\n";
+front(20, h)
+    whererec h = 1 :: merge(map double h,
+                       merge(map triple h,
+                             map times5 h));

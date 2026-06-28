@@ -1,0 +1,25 @@
+! qsort.hop — Quicksort
+
+fun fst (a, _) = a;
+fun snd (_, b) = b;
+
+fun partition(p, []) = ([], []);
+--- partition(p, x :: xs) =
+    (if x < p then (x :: fst r, snd r) else (fst r, x :: snd r))
+    where r = partition(p, xs);
+
+fun qsort [] = [];
+--- qsort (x :: xs) = qsort(fst p) <> [x] <> qsort(snd p)
+    where p = partition(x, xs);
+
+write "qsort [3,1,4,1,5,9,2,6]: ";
+qsort [3, 1, 4, 1, 5, 9, 2, 6];
+
+write "qsort [10,9..1]:         ";
+qsort [10, 9, 8, 7, 6, 5, 4, 3, 2, 1];
+
+write "qsort []:                ";
+qsort [];
+
+write "qsort [42]:              ";
+qsort [42];

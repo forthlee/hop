@@ -1,0 +1,9 @@
+pi = 3.14159265358979;
+
+! uses lists, range;
+
+n = 10;
+lst = map (+) (1..n || 2..n+1);
+
+pi;
+lst;

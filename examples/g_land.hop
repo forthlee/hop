@@ -1,0 +1,146 @@
+! g_land.hop — Land-use CA with three interactive sliders
+! Adapted from NetLogo tutorial on land-use change CA.
+!
+! Three parameters (drag sliders to adjust):
+!   max-ele  (0-50%): fraction of cells that are protected (undevelopable)
+!   initial  (0-50%): fraction of cells starting as residential
+!   threshold (1-8) : commercial neighbours needed for residential → commercial
+!
+! Land use: 0=undeveloped(green)  1=residential(yellow)
+!           2=commercial(red)     3=protected(brown)
+!
+! Rules (8-neighbour):
+!   undeveloped → residential  if 2 ≤ residential neighbours ≤ 5
+!   residential → commercial   if commercial neighbours ≥ threshold
+!   commercial  → undeveloped  if commercial neighbours > 4  (congestion)
+!   protected   → protected    (never changes)
+!
+! Dragging max-ele or initial resets the board.
+! Dragging threshold updates the rule live without resetting.
+! Space = reset;  ESC = quit
+
+uses lib;
+uses gui;
+
+! ---- grid and window ----
+w = 80;
+h = 60;
+S = 8;
+winH = h * S + 75;
+
+gopen (w * S, winH);
+gtitle "Land-Use CA";
+
+! ---- slider geometry (three stacked sliders in the 75-px panel) ----
+trackX0 = 85;
+trackX1 = w * S - 35;
+slY1    = h * S + 15;    ! max-ele
+slY2    = h * S + 40;    ! initial
+slY3    = h * S + 65;    ! threshold
+
+! ---- safe cell read ----
+fun cellAt x y board =
+    if (x >= 0) * (x < w) * (y >= 0) * (y < h)
+    then aget (y * w + x) board
+    else 0;
+
+! ---- count 8-neighbours of type t ----
+fun countType t x y board =
+    (if cellAt (x-1) (y-1) board == t then 1 else 0) +
+    (if cellAt  x    (y-1) board == t then 1 else 0) +
+    (if cellAt (x+1) (y-1) board == t then 1 else 0) +
+    (if cellAt (x-1)  y    board == t then 1 else 0) +
+    (if cellAt (x+1)  y    board == t then 1 else 0) +
+    (if cellAt (x-1) (y+1) board == t then 1 else 0) +
+    (if cellAt  x    (y+1) board == t then 1 else 0) +
+    (if cellAt (x+1) (y+1) board == t then 1 else 0);
+
+! ---- transition rules ----
+! Dispatch by current state so only the needed countType is called.
+fun nextCell x y board thr =
+    if cur == 3 then 3
+     else if cur == 0 then nextEmpty x y board
+     else nextBuilt cur x y board thr
+    where cur = cellAt x y board;
+
+fun nextEmpty x y board =
+    if (r >= 2) * (r <= 5) then 1 else 0
+    where r = countType 1 x y board;
+
+fun nextBuilt cur x y board thr =
+    if cur == 1 then (if c >= thr then 2 else 1)
+                 else (if c > 4   then 0 else 2)
+    where c = countType 2 x y board;
+
+! ---- build next generation ----
+fun stepH i board thr =
+    if i >= w * h then []
+    else nextCell (i mod w) ((i - i mod w) / w) board thr :: stepH (i + 1) board thr;
+fun step board thr = array (stepH 0 board thr);
+
+! ---- colours ----
+fun landColor 0 = 43520;
+--- landColor 1 = 16776960;
+--- landColor 2 = 16711680;
+--- landColor _ = 10053171;
+
+! ---- draw all three sliders ----
+! gscale 1 is last in source → first evaluated
+fun drawPanel me ini thr =
+    0
+    where _ = guiSlider trackX0 trackX1 slY3 1 8 thr
+    where _ = guiLabel 5 (slY3 - 4) 11184810 "threshold:"
+    where _ = guiSlider trackX0 trackX1 slY2 0 50 ini
+    where _ = guiLabel 5 (slY2 - 4) 11184810 "initial %:"
+    where _ = guiSlider trackX0 trackX1 slY1 0 50 me
+    where _ = guiLabel 5 (slY1 - 4) 11184810 "max-ele %:"
+    where _ = gscale 1;
+
+! ---- initial board ----
+! me  = protected %  (0-50)
+! ini = initial residential %  (0-50)
+fun mkBoardH i me ini =
+    if i >= w * h then []
+    else cell :: mkBoardH (i + 1) me ini
+    where cell = if rand 0 mod 100 < me then 3
+                  else if r2 mod 100 < ini then 1
+                  else 0
+    where r2 = rand 0;
+fun mkBoard me ini = array (mkBoardH 0 me ini) where _ = srand timeseed;
+
+! ---- animation loop ----
+! where-clause order (last in source = outermost = first evaluated):
+!   mx/my/clicked → inS1/2/3 → me2/ini2/thr2
+!   → gclear → gdrawcol → drawPanel → gloop → gsync → body
+!
+! inS1/inS2 (max-ele / initial): reset board on drag
+! inS3 (threshold): update rule live, no board reset
+fun frame board me ini thr t =
+    if closed != 0 then 0
+     else if gkey 27 == 1 then 0
+     else if gkey 32 == 1 then frame (mkBoard me ini) me ini thr (t+1)
+     else if inS1 then frame (mkBoard me2 ini) me2 ini thr  (t+1)
+     else if inS2 then frame (mkBoard me ini2) me ini2 thr  (t+1)
+     else if inS3 then frame (step board thr2) me ini thr2 (t+1)
+     else frame (step board thr) me ini thr (t+1)
+    where _ = gsync 0
+    where closed = gloop 0
+    where _ = drawPanel me2 ini2 thr2
+    where _ = gdrawcol (w, (h, (S, amap landColor board)))
+    where _ = gclear 0
+    where me2  = if inS1 then guiSliderVal trackX0 trackX1 0 50 mx else me
+    where ini2 = if inS2 then guiSliderVal trackX0 trackX1 0 50 mx else ini
+    where thr2 = if inS3 then guiSliderVal trackX0 trackX1 1 8  mx else thr
+    where inS3 = guiSliderHit trackX0 trackX1 slY3 mx my clicked
+    where inS2 = guiSliderHit trackX0 trackX1 slY2 mx my clicked
+    where inS1 = guiSliderHit trackX0 trackX1 slY1 mx my clicked
+    where clicked = gclick 0 > 0
+    where my = snd (gmouse 0)
+    where mx = fst (gmouse 0);
+
+initMe  = 45;
+initIni = 5;
+initThr = 3;
+
+write "" (frame (mkBoard initMe initIni) initMe initIni initThr 0);
+gclose 0;

@@ -1,0 +1,258 @@
+! dif.hop — Symbolic Differentiation
+!
+! Expression representation (tagged pairs):
+!   (0, n)              — numeric constant n
+!   (1, name)           — variable (name is a string)
+!   (2, (op, (e1, e2))) — binary op (op: '+' '-' '*' '/' '^')
+
+uses lib;
+
+! --- Constructors ---
+fun kon n          = (0, n);
+fun va name        = (1, name);
+fun mk(op, (a,b)) = (2, (op, (a, b)));
+
+! --- Expression equality ---
+fun expreq((0,a), (0,b)) = a == b;
+--- expreq((1,a), (1,b)) = streq(a, b);
+--- expreq((2,(op1,(a1,b1))), (2,(op2,(a2,b2)))) =
+    if op1 == op2 then if expreq(a1,a2) then expreq(b1,b2) else 0 else 0;
+--- expreq(_, _) = 0;
+
+! --- Differentiation ---
+fun dif1(dx, (0, _)) = kon 0;
+--- dif1(dx, (1, name)) = if streq(dx, name) then kon 1 else kon 0;
+--- dif1(dx, (2, ('+', (e1, e2)))) =
+    mk('+', (dif1(dx,e1), dif1(dx,e2)));
+--- dif1(dx, (2, ('-', (e1, e2)))) =
+    mk('-', (dif1(dx,e1), dif1(dx,e2)));
+--- dif1(dx, (2, ('*', (e1, e2)))) =
+    mk('+', (mk('*', (dif1(dx,e1), e2)), mk('*', (e1, dif1(dx,e2)))));
+--- dif1(dx, (2, ('/', (e1, e2)))) =
+    mk('/', (mk('-', (mk('*', (e2, dif1(dx,e1))), mk('*', (e1, dif1(dx,e2))))),
+             mk('^', (e2, kon 2))));
+--- dif1(dx, (2, ('^', (e1, e2)))) =
+    mk('*', (mk('*', (e2, mk('^', (e1, mk('-', (e2, kon 1)))))), dif1(dx, e1)));
+
+! --- Simplification rules ---
+fun sim (0, n) = (0, n);
+--- sim (1, name) = (1, name);
+--- sim (2, (op, (e1, e2))) = sim1(op, (sim e1, sim e2));
+
+fun sim1('+', ((0,0), x)) = x;
+--- sim1('+', (x, (0,0))) = x;
+--- sim1('+', ((0,a), (0,b))) = kon(a + b);
+--- sim1('-', (x, (0,0))) = x;
+--- sim1('-', ((0,a), (0,b))) = kon(a - b);
+--- sim1('*', ((0,0), _)) = kon 0;
+--- sim1('*', (_, (0,0))) = kon 0;
+--- sim1('*', ((0,1), x)) = x;
+--- sim1('*', (x, (0,1))) = x;
+--- sim1('*', ((0,a), (0,b))) = kon(a * b);
+--- sim1('/', ((0,0), _)) = kon 0;
+--- sim1('/', (x, (0,1))) = x;
+--- sim1('/', ((0,a), (0,b))) = kon(a / b) where _ = (a mod b == 0);
+--- sim1('/', (x, y)) = if expreq(x, y) then kon 1 else simDiv(x, (y, mk('/', (x, y))));
+
+! --- Division: x / x^n = x^(1-n)
+fun simDiv(x, ((2,('^',(b,n))), fallback)) =
+    if expreq(x, b) then simPow(x, sim1('-', (kon 1, n))) else fallback;
+--- simDiv(_, (_, fallback)) = fallback;
+
+! --- Negative exponent: x^(-n) = 1 / x^n
+fun simPow(x, (0, n)) =
+    if n < 0 then mk('/', (kon 1, sim1('^', (x, kon(0 - n)))))
+    else sim1('^', (x, kon n));
+--- simPow(x, e) = sim1('^', (x, e));
+
+--- sim1('^', (_, (0,0))) = kon 1;
+--- sim1('^', (x, (0,1))) = x;
+--- sim1('^', ((0,0), _)) = kon 0;
+--- sim1('^', ((0,1), _)) = kon 1;
+
+! --- Addition commutativity: pull constants together ---
+!   n + (m + e) = (n+m) + e
+--- sim1('+', ((0,a), (2,('+',((0,b), x))))) = sim1('+', (kon(a+b), x));
+--- sim1('+', ((0,a), (2,('+', (x, (0,b)))))) = sim1('+', (kon(a+b), x));
+!   (n + e) + m = (n+m) + e
+--- sim1('+', ((2,('+',((0,a), x))), (0,b))) = sim1('+', (kon(a+b), x));
+--- sim1('+', ((2,('+', (x, (0,a)))), (0,b))) = sim1('+', (kon(a+b), x));
+
+! --- Multiplication commutativity: pull constants together ---
+!   n * (m * e) = (n*m) * e
+--- sim1('*', ((0,a), (2,('*',((0,b), x))))) = sim1('*', (kon(a*b), x));
+--- sim1('*', ((0,a), (2,('*', (x, (0,b)))))) = sim1('*', (kon(a*b), x));
+!   (n * e) * m = (n*m) * e
+--- sim1('*', ((2,('*',((0,a), x))), (0,b))) = sim1('*', (kon(a*b), x));
+--- sim1('*', ((2,('*', (x, (0,a)))), (0,b))) = sim1('*', (kon(a*b), x));
+
+! --- Distributive law: n * (m + e) = n*m + n*e ---
+--- sim1('*', ((0,n), (2,('+', ((0,m), x))))) =
+    sim1('+', (kon(n*m), sim1('*', (kon n, x))));
+--- sim1('*', ((0,n), (2,('+', (x, (0,m)))))) =
+    sim1('+', (kon(n*m), sim1('*', (kon n, x))));
+!   (m + e) * n = n*m + n*e
+--- sim1('*', ((2,('+', ((0,m), x))), (0,n))) =
+    sim1('+', (kon(n*m), sim1('*', (kon n, x))));
+--- sim1('*', ((2,('+', (x, (0,m)))), (0,n))) =
+    sim1('+', (kon(n*m), sim1('*', (kon n, x))));
+
+--- sim1(op, (a, b)) = mk(op, (a, b));
+
+! --- Fixed-point simplification ---
+fun fixsim expr = fixsim1(expr, sim expr);
+fun fixsim1(expr, s) = if expreq(expr, s) then s else fixsim s;
+
+! --- Display: number to string ---
+fun digitsH(0, acc) = acc;
+--- digitsH(n, acc) = digitsH(intdiv(n, 10), (n mod 10 + '0') :: acc);
+
+fun showNat 0 = "0";
+--- showNat n = digitsH(n, []);
+
+fun showNum n = if n < 0 then '-' :: showNat(0 - n) else showNat n;
+
+! --- Display: expression to infix string ---
+fun showExpr (0, n) = showNum n;
+--- showExpr (1, name) = name;
+--- showExpr (2, (op, (e1, e2))) =
+    "(" <> showExpr e1 <> " " <> (op :: []) <> " " <> showExpr e2 <> ")";
+
+! --- Main: differentiate, simplify, display ---
+fun dif(dx, expr) = showExpr(fixsim(dif1(dx, expr)));
+
+! --- Parser: string to expression ---
+!   expr  = term (('+' | '-') term)*
+!   term  = power (('*' | '/') power)*
+!   power = atom ('^' atom)?
+!   atom  = number | variable | '(' expr ')'
+
+fun isdigit c = (c >= '0') * (c <= '9');
+fun isalpha c = (c >= 'a') * (c <= 'z') + (c >= 'A') * (c <= 'Z');
+fun digitval c = c - '0';
+
+fun pskip [] = [];
+--- pskip (' ' :: r) = pskip r;
+--- pskip ('\t' :: r) = pskip r;
+--- pskip r = r;
+
+fun pnum(acc, []) = (kon acc, []);
+--- pnum(acc, c :: r) =
+    if isdigit c then pnum(acc * 10 + digitval c, r)
+    else (kon acc, c :: r);
+
+fun pvar(acc, []) = (va(reverse acc), []);
+--- pvar(acc, c :: r) =
+    if isalpha c then pvar(c :: acc, r)
+    else (va(reverse acc), c :: r);
+
+fun patom ('(' :: r) =
+    (fst res, pskip(tail(pskip(snd res))))
+    where res = pexpr(pskip r);
+--- patom (c :: r) =
+    if isdigit c then pnum(digitval c, r)
+    else pvar(c :: [], r);
+
+fun ppow tokens = ppow1(fst a, pskip(snd a)) where a = patom tokens;
+fun ppow1(base, '^' :: r) =
+    (mk('^', (base, fst e)), snd e) where e = patom(pskip r);
+--- ppow1(base, r) = (base, r);
+
+fun pmul tokens = pmul1(fst f, pskip(snd f)) where f = ppow tokens;
+fun pmul1(acc, '*' :: r) =
+    pmul1(mk('*', (acc, fst f)), pskip(snd f)) where f = ppow(pskip r);
+--- pmul1(acc, '/' :: r) =
+    pmul1(mk('/', (acc, fst f)), pskip(snd f)) where f = ppow(pskip r);
+--- pmul1(acc, r) = (acc, r);
+
+fun pexpr tokens = padd1(fst t, pskip(snd t)) where t = pmul tokens;
+fun padd1(acc, '+' :: r) =
+    padd1(mk('+', (acc, fst t)), pskip(snd t)) where t = pmul(pskip r);
+--- padd1(acc, '-' :: r) =
+    padd1(mk('-', (acc, fst t)), pskip(snd t)) where t = pmul(pskip r);
+--- padd1(acc, r) = (acc, r);
+
+fun parse s = fst(pexpr(pskip s));
+
+! --- Convenience: differentiate from string ---
+fun sdif(dx, s) = dif(dx, parse s);
+
+! ===== Tests =====
+
+write "=== Symbolic Differentiation ===\n\n";
+
+! d/dx(x^3) = 3 * x^2
+write "d/dx (x^3)          = %s\n"
+    (dif("x", mk('^', (va "x", kon 3))));
+
+! d/dx(x^2 + 3x) = 2x + 3
+write "d/dx (x^2 + 3x)     = %s\n"
+    (dif("x", mk('+', (mk('^', (va "x", kon 2)), mk('*', (kon 3, va "x"))))));
+
+! d/dx(5) = 0
+write "d/dx (5)            = %s\n"
+    (dif("x", kon 5));
+
+! d/dx(x) = 1
+write "d/dx (x)            = %s\n"
+    (dif("x", va "x"));
+
+! d/dx(y) = 0
+write "d/dx (y)            = %s\n"
+    (dif("x", va "y"));
+
+! d/dx((1+0) * x^3) = 3 * x^2
+write "d/dx ((1+0)*x^3)    = %s\n"
+    (dif("x", mk('*', (mk('+', (kon 1, kon 0)), mk('^', (va "x", kon 3))))));
+
+! d/dx(x/y)
+write "d/dx (x/y)          = %s\n"
+    (dif("x", mk('/', (va "x", va "y"))));
+
+! d/dx(3x^2 + 2x + 1) = 6x + 2
+write "d/dx (3x^2+2x+1)    = %s\n"
+    (dif("x", mk('+', (mk('+', (mk('*', (kon 3, mk('^', (va "x", kon 2)))),
+                                mk('*', (kon 2, va "x")))), kon 1))));
+
+! d/dx(x^5) = 5 * x^4
+write "d/dx (x^5)          = %s\n"
+    (dif("x", mk('^', (va "x", kon 5))));
+
+write "\n=== Simplification Tests (from Lisp version) ===\n\n";
+
+! SIM test 4: 0 + 2*(3*x) = 6*x
+sim4 = showExpr(fixsim(mk('+', (kon 0, mk('*', (kon 2, mk('*', (kon 3, va "x"))))))));
+write "sim 0+2*(3*x)       = %s\n" sim4;
+
+! SIM test 5: 4 + (3 + 5*(3*x)) = (7 + (15 * x))
+sim5 = showExpr(fixsim(mk('+', (kon 4, mk('+', (kon 3, mk('*', (kon 5, mk('*', (kon 3, va "x"))))))))));
+write "sim 4+(3+5*(3*x))   = %s\n" sim5;
+
+! SIM test 7: 3*(4+5*x) = (12 + (15 * x))
+sim7 = showExpr(fixsim(mk('*', (kon 3, mk('+', (kon 4, mk('*', (kon 5, va "x"))))))));
+write "sim 3*(4+5*x)       = %s\n" sim7;
+
+! SIM test 8: (5*x+4)*3 = (12 + (15 * x))
+sim8 = showExpr(fixsim(mk('*', (mk('+', (mk('*', (kon 5, va "x")), kon 4)), kon 3))));
+write "sim (5*x+4)*3       = %s\n" sim8;
+
+write "\n=== Differentiation Tests (from Lisp version) ===\n\n";
+
+! Lisp test 10: d/dx(y*0 + (3x+1)^2) = (6 + (18 * x))
+dif10 = dif("x", mk('+', (mk('*', (va "y", kon 0)),
+                          mk('^', (mk('+', (mk('*', (kon 3, va "x")), kon 1)), kon 2)))));
+write "d/dx (y*0+(3x+1)^2) = %s\n" dif10;
+
+write "\n=== Parser + Differentiation ===\n\n";
+
+! Parser round-trip tests
+write "parse \"x^5\"          = %s\n" (showExpr(parse "x^5"));
+write "parse \"3*x^2+2*x+1\"  = %s\n" (showExpr(parse "3*x^2+2*x+1"));
+write "parse \"(a+b)*(a-b)\"  = %s\n" (showExpr(parse "(a+b)*(a-b)"));
+write "parse \"x/y\"          = %s\n" (showExpr(parse "x/y"));
+
+! Differentiate from string
+write "sdif x \"x^5\"         = %s\n" (sdif("x", "x^5"));
+write "sdif x \"3*x^2+2*x+1\" = %s\n" (sdif("x", "3*x^2+2*x+1"));
+write "sdif x \"x/y\"         = %s\n" (sdif("x", "x/y"));
+write "sdif x \"(1+0)*x^3\"   = %s\n" (sdif("x", "(1+0)*x^3"));

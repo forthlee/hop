@@ -1,0 +1,16 @@
+! g_pixel.hop — noise pixel animation
+
+gopen (320, 240);
+
+fun noise _ = rand 0;
+
+fun frame t =
+    if closed != 0 then 0
+     else if gkey 27 == 1 then 0
+     else frame (t + 1)
+    where _ = gsync 0
+    where closed = gloop 0
+    where _ = gblit (tabulate (320 * 240) noise);
+
+write "" (frame 0);
+gclose 0;

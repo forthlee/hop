@@ -1,0 +1,65 @@
+! life.hop — Conway's Game of Life (animated)
+
+uses lib;
+
+! ---- grid size ----
+w = 80;
+h = 60;
+S = 8;
+
+gopen (w * S, h * S);
+gtitle "Conway's Game of Life";
+
+! ---- cell access (toroidal wrap-around) ----
+fun cellAt x y board =
+    aget ((y + h) mod h * w + (x + w) mod w) board;
+
+! ---- count live neighbors ----
+fun neighbors x y board =
+    cellAt (x - 1) (y - 1) board + cellAt x (y - 1) board + cellAt (x + 1) (y - 1) board +
+    cellAt (x - 1) y board                                + cellAt (x + 1) y board +
+    cellAt (x - 1) (y + 1) board + cellAt x (y + 1) board + cellAt (x + 1) (y + 1) board;
+
+! ---- next cell state ----
+fun nextCell x y board =
+    if (n == 3) + (n == 2) * c > 0 then 1 else 0
+    where n = neighbors x y board
+    where c = cellAt x y board;
+
+! ---- build next generation ----
+fun step board = array (stepH 0 board);
+fun stepH i board =
+    if i >= w * h then []
+    else nextCell (i mod w) ((i - i mod w) / w) board :: stepH (i + 1) board;
+
+! ---- random board ----
+fun randBoard 0 = [];
+--- randBoard n = (if rand 0 mod 5 == 0 then 1 else 0) :: randBoard (n - 1);
+
+fun newBoard _ = array (randBoard (w * h)) where _ = srand timeseed;
+
+initBoard = newBoard 0;
+
+! ---- cell colour ----
+fun cellColor 0 = 0;
+--- cellColor _ = 65280;
+
+! ---- grid lines ----
+gray = 3355443;
+fun gridH y = if y > h * S then 0 else gline 0 y (w * S - 1) y gray + gridH (y + S);
+fun gridV x = if x > w * S then 0 else gline x 0 x (h * S - 1) gray + gridV (x + S);
+fun drawGrid _ = gridH 0 + gridV 0;
+
+! ---- animation loop ----
+fun frame board t =
+    if closed != 0 then 0
+     else if gkey 27 == 1 then 0
+     else if gkey 32 == 1 then frame (newBoard 0) (t + 1)
+     else frame (step board) (t + 1)
+    where _ = gsync 0
+    where closed = gloop 0
+    where _ = drawGrid 0
+    where _ = gdrawcol (w, (h, (S, amap cellColor board)));
+
+write "" (frame initBoard 0);
+gclose 0;

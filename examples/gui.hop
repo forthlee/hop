@@ -1,0 +1,119 @@
+! gui.hop — Reusable GUI components: Label, Slider, Button, Input
+!
+! Requires: uses lib;  (for fst, snd, null, init, map, etc.)
+!
+! Components:
+!   guiLabel   x y col text            → draw a text label
+!   guiSlider  x0 x1 y min max val     → draw a slider (track + thumb + value)
+!   guiSliderHit x0 x1 y mx my clicked → 1 if mouse is dragging this slider
+!   guiSliderVal x0 x1 min max mx      → map mouse-x to slider value
+!   guiButton  x y w h col label       → draw a button (filled rect + border + text)
+!   guiButtonDown x y w h mx my clicked → 1 if button is being pressed
+!   guiButtonClick x y w h mx my clicked prev → 1 on rising edge (click)
+!   guiInput   x y w col buf           → draw a text input field (border + text + cursor)
+!   guiInputKey buf k                  → update buffer with keypress k
+!
+! All drawing functions return 0.
+! State (slider value, button down, input buffer) is managed by the caller.
+!
+! Colour conventions (caller may override by passing any 0xRRGGBB value):
+!   guiGray   = 6710886  (0x666666)
+!   guiWhite  = 16777215 (0xFFFFFF)
+!   guiYellow = 16776960 (0xFFFF00)
+!   guiBlue   = 4473924  (0x4444C4)
+
+guiGray   = 6710886;
+guiWhite  = 16777215;
+guiYellow = 16776960;
+guiBlue   = 4473924;
+
+! ---- scale-dependent char dimensions (matches gscale 2) ----
+! guiCharW = 6 * gscale  (char advance in px)
+! guiCharH = 7 * gscale  (glyph height in px)
+guiCharW = 12;
+guiCharH = 14;
+
+! ---- integer to char list ----
+fun guiDigitsH n =
+    if n < 10 then [48 + n]
+    else guiDigitsH (intdiv(n, 10)) <> [48 + n mod 10];
+fun guiNumStr n =
+    if n < 0 then [45] <> guiDigitsH (0 - n)
+    else guiDigitsH n;
+
+! ---- Label ----
+fun guiLabel x y col text =
+    0
+    where _ = gtext x y col text;
+
+! ---- Slider ----
+! Draw: track line + thumb tick + value text to the right
+! where-clause order: last in source = first evaluated
+fun guiSlider x0 x1 y min max val =
+    0
+    where _ = gtext (x1 + 6) (y - 4) guiYellow (guiNumStr val)
+    where _ = gline thumbX (y - 7) thumbX (y + 7) guiYellow
+    where _ = gpen 3
+    where _ = gline x0 y x1 y guiGray
+    where _ = gpen 1
+    where thumbX = x0 + intdiv((val - min) * (x1 - x0), max - min);
+
+! 1 if mouse is currently dragging this slider
+fun guiSliderHit x0 x1 y mx my clicked =
+    clicked * (mx >= x0 - 8) * (mx <= x1 + 8) * (abs (my - y) <= 12) > 0;
+
+! Map mouse-x to slider value, clamped to [lo, hi]
+fun guiSliderVal x0 x1 lo hi mx =
+    max(lo, min(hi, lo + intdiv((mx - x0) * (hi - lo), x1 - x0)));
+
+! ---- Button ----
+! Draw: filled rect (col) + white border + centred label
+! Text centering uses guiCharW / guiCharH (set for gscale 2)
+! Fill by drawing h horizontal lines from top to bottom
+fun guiFillRect x y w h col = guiFillRectH x y w h col 0;
+fun guiFillRectH x y w h col i =
+    if i >= h then 0
+    else (0 where _ = guiFillRectH x y w h col (i + 1)
+            where _ = gline x (y + i) (x + w) (y + i) col);
+
+fun guiButton x y w h col label =
+    0
+    where _ = gtext (x + intdiv(w - length label * guiCharW, 2)) (y + intdiv(h - guiCharH, 2)) guiWhite label
+    where _ = gline x y (x+w) y guiWhite
+    where _ = gline x (y+h) (x+w) (y+h) guiWhite
+    where _ = gline x y x (y+h) guiWhite
+    where _ = gline (x+w) y (x+w) (y+h) guiWhite
+    where _ = guiFillRect x y w h col;
+
+! 1 if mouse is inside button area and mouse button is held
+fun guiButtonDown x y w h mx my clicked =
+    clicked * (mx >= x) * (mx <= x + w) * (my >= y) * (my <= y + h) > 0;
+
+! 1 on the frame when button transitions from up to down (rising edge)
+! prev = guiButtonDown from last frame
+fun guiButtonClick x y w h mx my clicked prev =
+    (guiButtonDown x y w h mx my clicked) * (1 - prev);
+
+! ---- Input field ----
+! Draw: border rect + text + cursor  (field height = guiCharH + 8)
+! Cursor spans from y+2 to y+guiCharH+4
+fun guiInput x y w col buf =
+    0
+    where _ = gline (cx + 1) (y + 2) (cx + 1) (y + guiCharH + 4) guiWhite
+    where _ = gtext (x + 4) (y + 3) guiWhite buf
+    where _ = gline x y (x+w) y col
+    where _ = gline x (y+guiCharH+8) (x+w) (y+guiCharH+8) col
+    where _ = gline x y x (y+guiCharH+8) col
+    where _ = gline (x+w) y (x+w) (y+guiCharH+8) col
+    where cx = x + 4 + length buf * guiCharW;
+
+! Update input buffer with a keypress:
+!   k=0   → no change
+!   k=8   → backspace (remove last char)
+!   k=13  → enter (no change; caller may detect and act on it)
+!   32-126 → append printable char
+fun guiInputKey buf k =
+    if k == 0 then buf
+    else if k == 8 then (if null buf then [] else init buf)
+    else if (k >= 32) * (k <= 126) > 0 then buf <> [k]
+    else buf;

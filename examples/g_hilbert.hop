@@ -1,0 +1,70 @@
+! hilbert_demo.hop — Hilbert Curve
+! Recursive turtle graphics (90-degree turns only, no trigonometry)
+uses lib;
+
+gopen (520, 520);
+gclear 0;
+gpen 1;
+
+! Direction: 0=right, 1=down, 2=left, 3=up
+fun ddx 0 = 1;
+--- ddx 1 = 0;
+--- ddx 2 = 0 - 1;
+--- ddx 3 = 0;
+
+fun ddy 0 = 0;
+--- ddy 1 = 1;
+--- ddy 2 = 0;
+--- ddy 3 = 0 - 1;
+
+! State = (x, (y, dir))
+! Turn: t=1 turn right, t=3 turn left
+fun turn x y d t = (x, (y, (d + t) mod 4));
+
+! Move forward: draw line and advance
+fun forward x y d step c =
+    (x2, (y2, d))
+    where _ = gline x y x2 y2 c
+    where y2 = y + ddy d * step
+    where x2 = x + ddx d * step;
+
+! hilbert (x,(y,dir)) step order parity color
+! parity: 1=normal, 3=mirrored (toggle with 4-par)
+fun hcurve x y d step 0 par c = (x, (y, d));
+--- hcurve x y d step n par c =
+    (fst r10, (fst (snd r10), snd (snd r10)))
+    where r10 = turn x9 y9 d9 (4 - par)
+    where x9 = fst r9 where y9 = fst (snd r9) where d9 = snd (snd r9)
+    where r9 = hcurve x8 y8 d8 step (n - 1) (4 - par) c
+    where x8 = fst r8 where y8 = fst (snd r8) where d8 = snd (snd r8)
+    where r8 = forward x7 y7 d7 step c
+    where x7 = fst r7 where y7 = fst (snd r7) where d7 = snd (snd r7)
+    where r7 = turn x6 y6 d6 par
+    where x6 = fst r6 where y6 = fst (snd r6) where d6 = snd (snd r6)
+    where r6 = hcurve x5 y5 d5 step (n - 1) par c
+    where x5 = fst r5 where y5 = fst (snd r5) where d5 = snd (snd r5)
+    where r5 = forward x4 y4 d4 step c
+    where x4 = fst r4 where y4 = fst (snd r4) where d4 = snd (snd r4)
+    where r4 = hcurve x3 y3 d3 step (n - 1) par c
+    where x3 = fst r3 where y3 = fst (snd r3) where d3 = snd (snd r3)
+    where r3 = turn x2 y2 d2 par
+    where x2 = fst r2 where y2 = fst (snd r2) where d2 = snd (snd r2)
+    where r2 = forward x1 y1 d1 step c
+    where x1 = fst r1 where y1 = fst (snd r1) where d1 = snd (snd r1)
+    where r1 = hcurve x0 y0 d0 step (n - 1) (4 - par) c
+    where x0 = fst r0 where y0 = fst (snd r0) where d0 = snd (snd r0)
+    where r0 = turn x y d (4 - par);
+
+! Order and step size
+order = 5;
+step = 500 / (1 * 2 * 2 * 2 * 2 * 2 - 1);
+
+write "" (hcurve 10 510 0 step order 1 65535);
+
+gtitle "Hilbert Curve (order 5)";
+
+fun loop _ = if gloop 0 == 0
+    then if gkey 27 == 1 then 0 else loop (gsync 0)
+    else 0;
+loop 0;
+gclose 0;

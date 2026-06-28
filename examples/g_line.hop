@@ -1,0 +1,98 @@
+! line.hop — Rotating bouncing line with fading trails
+uses lib;
+
+rd = pi / 180;
+fun sinT a = sin (a * rd);
+fun cosT a = cos (a * rd);
+
+gopen (320, 240);
+
+! LCG random
+! Random initial state
+_ = srand timeseed;
+ma0 = rand 0 mod 360;
+da0 = if rand 0 mod 2 == 0 then 1.5 else 0 - 1.5;
+
+! Movement speed (constant)
+spd = 2.5;
+
+! Line half-length range
+minHL = 15;
+maxHL = 70;
+
+! Green color
+greenBright = 65280;
+
+! Draw a line at (cx,cy) with angle ang, half-length hl, color c
+fun drawLine cx cy ang hl c =
+    gline x1 y1 x2 y2 c
+    where x1 = trunc(cx + hl * cosT ang)
+    where y1 = trunc(cy + hl * sinT ang)
+    where x2 = trunc(cx - hl * cosT ang)
+    where y2 = trunc(cy - hl * sinT ang);
+
+! Trail = ((cx, cy), (ang, (hl, 0)))
+fun drawTrails [] = 0;
+--- drawTrails (((cx, cy), (ang, (hl, br))) :: rest) =
+    drawLine cx cy ang hl greenBright + drawTrails rest;
+
+! Keep at most n items
+fun limit 0 _ = [];
+--- limit n [] = [];
+--- limit n (x :: xs) = x :: limit (n - 1) xs;
+
+! Every N frames, add a trail snapshot
+trailInterval = 3;
+maxTrails = 6;
+
+! Reflect movement angle off walls
+! ma = movement angle in degrees
+fun reflectX ma = 360 - ma;
+fun reflectY ma = 180 - ma;
+
+! Normalize angle to [0, 360)
+fun norm a = if a < 0 then norm (a + 360)
+             else if a >= 360 then norm (a - 360)
+             else a;
+
+! Main loop: ma = movement angle, ang = line rotation angle
+fun frame x y ma ang da hl dhl tick trails =
+    if closed != 0 then 0
+     else if gkey 27 == 1 then 0
+     else frame nx ny nma nang nda nhl ndhl (tick + 1) newTrails
+    where newTrails = if tick mod trailInterval == 0
+                       then limit maxTrails (((nx, ny), (nang, (nhl, 0))) :: trails)
+                       else trails
+    ! Reverse line rotation randomly: ~2% chance
+    where nda = if r1 mod 50 == 0 then 0 - da else da
+    ! Nudge movement angle: small drift + occasional big turn
+    where nma = norm (ma3 + (r2 mod 5 - 2) * 2 + bigTurn)
+    where bigTurn = if r1 mod 30 == 0 then r2 mod 60 - 30 else 0
+    ! Reflect off walls
+    where ma3 = if hitY then norm (reflectY ma2) else ma2
+    where ma2 = if hitX then norm (reflectX ma) else ma
+    where r2 = rand 0
+    where r1 = rand 0
+    where _ = gsync 0
+    where closed = gloop 0
+    where _ = drawTrails trails
+    where _ = drawLine nx ny nang nhl greenBright
+    where _ = gclear 0
+    where nhl = hl + ndhl
+    where ndhl = if hl + dhl < minHL then abs dhl
+                  else if hl + dhl > maxHL then 0 - abs dhl
+                  else dhl
+    where nang = ang + da
+    where hitX = if x + spd * cosT ma < 1 + hl then 1
+                  else if x + spd * cosT ma > 318 - hl then 1 else 0
+    where hitY = if y + spd * sinT ma < 1 + hl then 1
+                  else if y + spd * sinT ma > 238 - hl then 1 else 0
+    where nx = if rx < 1 + hl then 1 + hl
+                else if rx > 318 - hl then 318 - hl else rx
+    where ny = if ry < 1 + hl then 1 + hl
+                else if ry > 238 - hl then 238 - hl else ry
+    where rx = x + spd * cosT ma
+    where ry = y + spd * sinT ma;
+
+write "" (frame 160 120 ma0 0 da0 40 1.0 0 []);
+gclose 0;

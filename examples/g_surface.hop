@@ -1,0 +1,54 @@
+! g_surface.hop — 3D Surface Plot (hidden-surface horizon method)
+! Adapted from surface.c (Isao Aoki, glib)
+uses lib;
+
+rd = pi / 180;
+cos_x = cos (30 * rd);
+sin_x = sin (30 * rd);
+cos_y = cos (0 - 30 * rd);
+sin_y = sin (0 - 30 * rd);
+
+gopen (640, 400);
+gclear 0;
+gtitle "3D Surface";
+white = 16777215;
+
+fun surfY x z =
+    30 * (cos (r * rd) + cos (3 * r * rd))
+    where r = sqrt (x * x + z * z);
+
+fun updateMin px py yminA =
+    if px >= 0 then if px < 640 then
+        if py < aget px yminA
+        then (aset px py yminA where _ = gplot (px, (py, white)))
+        else yminA
+    else yminA else yminA;
+
+fun updateMax px py ymaxA =
+    if px >= 0 then if px < 640 then
+        if py > aget px ymaxA
+        then (aset px py ymaxA where _ = gplot (px, (py, white)))
+        else ymaxA
+    else ymaxA else ymaxA;
+
+fun scanX x z yminA ymaxA =
+    if x > 200 then (yminA, ymaxA)
+    else scanX (x + 1) z (updateMin px py yminA) (updateMax px py ymaxA)
+    where py = 399 - trunc (y * cos_x - (0 - x * sin_y + z * cos_y) * sin_x + 200)
+    where y = surfY x z
+    where px = trunc (x * cos_y + z * sin_y + 300);
+
+fun scanZ z yminA ymaxA =
+    if z < 0 - 200 then 0
+    else scanZ (z - 10) (fst r) (snd r)
+    where r = scanX (0 - 200) z yminA ymaxA;
+
+write "" (scanZ 200 (amake 640 399) (amake 640 0));
+
+! Wait for window close or ESC
+fun waitLoop _ =
+    if gloop 0 == 0
+    then (if gkey 27 == 1 then 0 else waitLoop (gsync 0))
+    else 0;
+waitLoop 0;
+gclose 0;

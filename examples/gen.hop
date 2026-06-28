@@ -1,0 +1,116 @@
+! gen.hop — Genetic Algorithm for hop
+!
+! Finds binary string [b0..b4] minimizing (16*b0 + 8*b1 + 4*b2 + 2*b3 + b4)
+! Optimal: 00000 = 0
+!
+! Usage: step(population, seed) — one generation
+!        mkPop(seed, n) — create n random individuals
+
+uses lib;
+
+! ---- PRNG (linear congruential generator) ----
+
+fun rng(seed, max) = (next mod max, next)
+    where next = (seed * 1103 + 13849) mod 65536;
+
+! ---- Gene operations ----
+
+fun weighted([], []) = 0;
+--- weighted(x :: xs, w :: ws) = x * w + weighted(xs, ws);
+
+fun decode gene = weighted(gene, [16, 8, 4, 2, 1]);
+
+fun score gene = 1 - v * v where v = decode gene;
+
+! ---- Create random population ----
+
+fun mkGene(seed, 0) = ([], seed);
+--- mkGene(seed, n) =
+    (bit :: rest, s2)
+    where (rest, s2) = mkGene(s1, n - 1)
+    where (bit, s1) = rng(seed, 2);
+
+fun mkPop(seed, 0) = ([], seed);
+--- mkPop(seed, n) =
+    (gene :: rest, s2)
+    where (rest, s2) = mkPop(s1, n - 1)
+    where (gene, s1) = mkGene(seed, 5);
+
+! ---- Selection: sort by fitness descending ----
+
+fun sortPop [] = [];
+--- sortPop (x :: xs) = ins x (sortPop xs);
+
+fun ins x [] = [x];
+--- ins x (y :: ys) =
+    if score x >= score y then x :: y :: ys
+    else y :: ins x ys;
+
+! ---- Crossover: single-point ----
+
+fun splitAt(0, lst) = ([], lst);
+--- splitAt(n, x :: xs) =
+    (x :: left, right)
+    where (left, right) = splitAt(n - 1, xs);
+
+fun cross((g1, g2), seed) =
+    ([left1 <> right2, left2 <> right1], s1)
+    where (left1, right1) = splitAt(pt + 1, g1)
+    where (left2, right2) = splitAt(pt + 1, g2)
+    where (pt, s1) = rng(seed, 4);
+
+! ---- Mutation: flip one random bit ----
+
+fun flipAt 0 (x :: rest) = (1 - x) :: rest;
+--- flipAt n (x :: rest) = x :: flipAt (n - 1) rest;
+
+fun mutate(gene, seed) =
+    (flipAt pt gene, s1)
+    where (pt, s1) = rng(seed, 5);
+
+! ---- One generation step ----
+! Keep best, crossover 2 pairs from top-4, mutate 2nd-best
+
+fun step(pop, seed) =
+    (best :: c1 <> c2 <> [m], s3)
+    where (m, s3) = mutate(nth 1 sorted, s2)
+    where (c2, s2) = cross((nth 2 sorted, nth 3 sorted), s1)
+    where (c1, s1) = cross((nth 0 sorted, nth 1 sorted), seed)
+    where best = nth 0 sorted
+    where sorted = sortPop pop;
+
+! ---- Display helpers ----
+
+fun showD 0 = "";
+--- showD n = showD (intdiv(n, 10)) <> [n mod 10 + '0'];
+
+fun showInt 0 = "0";
+--- showInt n = if n < 0 then "-" <> showD (0 - n) else showD n;
+
+fun showGene [] = "";
+--- showGene (b :: bs) = [b + '0'] <> showGene bs;
+
+fun showPop [] = "";
+--- showPop (g :: gs) =
+    "  " <> showGene g <> " = " <> showInt (decode g) <> "\n" <> showPop gs;
+
+! ---- Run evolution, build output string ----
+
+fun evolve pop seed 0 gen =
+    "Gen " <> showInt gen <> ":\n" <> showPop (sortPop pop);
+--- evolve pop seed n gen =
+    "Gen " <> showInt gen <> ":\n" <> showPop sorted <> "\n"
+    <> evolve newPop newSeed (n - 1) (gen + 1)
+    where (newPop, newSeed) = step(pop, seed)
+    where sorted = sortPop pop;
+
+fun go (pop, seed) = evolve pop seed 10 0;
+
+! ===== Demo =====
+
+write "=== Genetic Algorithm ===\n";
+write "Target: minimize f = (16*b0 + 8*b1 + 4*b2 + 2*b3 + b4)\n";
+write "Optimal: 00000 (f=0)\n";
+write "Population: 6, Gene length: 5\n\n";
+
+write "%s" (go (mkPop(42, 6)));

@@ -1,0 +1,329 @@
+! math.hop — Educational demonstration of implementing math functions in pure Hope
+!
+! NOTE: hop now provides the following as built-in C math functions:
+!   sin, cos, tan, asin, acos, atan, atan2, exp, log, log10,
+!   sqrt, pow, floor, ceil, fabs — all in radians
+!   pi — constant (3.14159265358979...)
+!
+! The Hope implementations below are for learning purposes only.
+! They are shadowed at runtime by the faster C built-ins.
+uses lib;
+
+! ===== Square root via Newton's method =====
+! (shadowed at runtime by C built-in sqrt)
+fun sqrtIter x g =
+    if abs(g * g - x) < 0.00000000001 then g
+    else sqrtIter x ((g + x / g) / 2);
+fun sqrtS x = if x <= 0 then 0 else sqrtIter x (x / 2 + 0.5);
+
+write "sqrt(2)  = %f  (expect 1.4142)\n" (sqrtS 2);
+write "sqrt(9)  = %f  (expect 3.0)\n"    (sqrtS 9);
+write "sqrt(0)  = %f  (expect 0)\n"      (sqrtS 0);
+write "\n";
+
+! ===== Constants =====
+pi = 3.14159265358979;
+
+! ===== Angle normalization =====
+! Reduce angle (radians) to [0, 2*pi)
+fun normalize x =
+    (if x < 0 then normalize(x + 2 * pi) else
+     if x >= 2 * pi then normalize(x - 2 * pi) else x);
+
+! ================================================================
+!  Method 1: Taylor Series Approximation
+! ================================================================
+! sin(x) = x - x^3/3! + x^5/5! - x^7/7! + ...
+! cos(x) = 1 - x^2/2! + x^4/4! - x^6/6! + ...
+!
+! We compute iteratively: each term = prev_term * (-x^2) / (n*(n+1))
+
+! taylorStep: accumulate Taylor series
+! acc=running sum, term=current term, x2=x*x, n=next denominator start
+fun taylorStep acc term x2 n =
+    if abs term < 0.0000000001 then acc
+    else taylorStep (acc + term) (0 - term * x2 / (n * (n + 1))) x2 (n + 2);
+
+! Reduce to [-pi, pi] for better convergence
+fun reduce x = (if y > pi then y - 2 * pi else y) where y = normalize x;
+
+fun sinS x = taylorStep 0 r (r * r) 2 where r = reduce x;
+fun cosS x = taylorStep 0 1 (r * r) 1 where r = reduce x;
+fun tanS x = sinS x / cosS x;
+
+! ---- Inverse trig: bisection method ----
+! asinBisect: find angle in [lo, hi] where sin(angle) = v
+fun asinBisect v lo hi 0 = (lo + hi) / 2;
+--- asinBisect v lo hi n =
+    (if sinS mid < v then asinBisect v mid hi (n - 1)
+     else asinBisect v lo mid (n - 1))
+    where mid = (lo + hi) / 2;
+
+! asin: result in [-pi/2, pi/2]
+fun asinS v =
+    if v < 0 then 0 - asinS(0 - v)
+    else if v >= 1 then pi / 2
+    else asinBisect v 0 (pi / 2) 50;
+
+fun acosS v = pi / 2 - asinS v;
+fun atanS v = asinS(v / sqrtS(1 + v * v));
+
+! ---- Logarithm ----
+! ln(x) = k*ln2 + ln(m), where m in [1,2) and x = m * 2^k
+! ln(m) via series: ln(m) = 2*(d + d^3/3 + d^5/5 + ...) where d=(m-1)/(m+1)
+ln2 = 0.69314718055995;
+
+! lnReduce: divide x by 2 until in [1, 2), return (m, k)
+fun lnReduce(x, k) =
+    if x < 1 then lnReduce(x * 2, k - 1)
+    else if x >= 2 then lnReduce(x / 2, k + 1)
+    else (x, k);
+
+! lnSeries: 2 * sum d^(2i+1)/(2i+1), iteratively
+! acc=sum, dp=d^(2i+1) current power, d2=d*d, i=denominator
+fun lnSeries acc dp d2 i =
+    if abs dp < 0.0000000001 then 2 * acc
+    else lnSeries (acc + dp / i) (dp * d2) d2 (i + 2);
+
+fun lnS x =
+    (snd p * ln2 + lnSeries 0 d (d * d) 1)
+    where d = (fst p - 1) / (fst p + 1)
+    where p = lnReduce(x, 0);
+
+fun log10S x = lnS x / ln2 * 0.30102999566398;
+
+! ---- Exponential ----
+! exp(x) = 1 + x + x^2/2! + x^3/3! + ...
+fun expTaylor acc term x n =
+    if abs term < 0.0000000001 then acc
+    else expTaylor (acc + term) (term * x / n) x (n + 1);
+
+fun expS x = expTaylor 0 1 x 1;
+
+write "=== Taylor Series Approximation ===\n";
+write "sin(0)       = %f\n" (sinS 0);
+write "sin(pi/6)    = %f  (expect 0.5)\n" (sinS(pi / 6));
+write "sin(pi/4)    = %f  (expect 0.7071)\n" (sinS(pi / 4));
+write "sin(pi/3)    = %f  (expect 0.8660)\n" (sinS(pi / 3));
+write "sin(pi/2)    = %f  (expect 1.0)\n" (sinS(pi / 2));
+write "sin(pi)      = %f  (expect 0.0)\n" (sinS pi);
+write "cos(0)       = %f  (expect 1.0)\n" (cosS 0);
+write "cos(pi/3)    = %f  (expect 0.5)\n" (cosS(pi / 3));
+write "cos(pi/2)    = %f  (expect 0.0)\n" (cosS(pi / 2));
+write "cos(pi)      = %f  (expect -1.0)\n" (cosS pi);
+write "tan(pi/4)    = %f  (expect 1.0)\n" (tanS(pi / 4));
+write "sin(-pi/6)   = %f  (expect -0.5)\n" (sinS(0 - pi / 6));
+write "asin(0.5)    = %f  (expect 0.5236 = pi/6)\n" (asinS 0.5);
+write "asin(1)      = %f  (expect 1.5708 = pi/2)\n" (asinS 1);
+write "asin(-0.5)   = %f  (expect -0.5236)\n" (asinS(0 - 0.5));
+write "acos(0.5)    = %f  (expect 1.0472 = pi/3)\n" (acosS 0.5);
+write "acos(0)      = %f  (expect 1.5708 = pi/2)\n" (acosS 0);
+write "atan(1)      = %f  (expect 0.7854 = pi/4)\n" (atanS 1);
+write "atan(0)      = %f  (expect 0)\n" (atanS 0);
+write "atan(-1)     = %f  (expect -0.7854)\n" (atanS(0 - 1));
+write "ln(1)        = %f  (expect 0)\n" (lnS 1);
+write "ln(2)        = %f  (expect 0.6931)\n" (lnS 2);
+write "ln(e)        = %f  (expect 1.0)\n" (lnS(expS 1));
+write "ln(10)       = %f  (expect 2.3026)\n" (lnS 10);
+write "ln(0.5)      = %f  (expect -0.6931)\n" (lnS 0.5);
+write "log10(10)    = %f  (expect 1.0)\n" (log10S 10);
+write "log10(100)   = %f  (expect 2.0)\n" (log10S 100);
+write "log10(2)     = %f  (expect 0.3010)\n" (log10S 2);
+write "exp(0)       = %f  (expect 1.0)\n" (expS 0);
+write "exp(1)       = %f  (expect 2.7183)\n" (expS 1);
+write "exp(2)       = %f  (expect 7.3891)\n" (expS 2);
+write "exp(-1)      = %f  (expect 0.3679)\n" (expS(0 - 1));
+write "\n";
+
+! ================================================================
+!  Method 2: Lookup Table with Linear Interpolation
+! ================================================================
+! Pre-stored sin values at 0°, 10°, 20°, ..., 90° (10-degree steps)
+! Then use symmetry to cover full circle, and interpolate between entries.
+
+! sin values for 0, 5, 10, 15, ..., 90 degrees (every 5°, 19 entries)
+sinTable = [0.0,
+            0.08715574274766,
+            0.17364817766693,
+            0.25881904510252,
+            0.34202014332567,
+            0.42261826174070,
+            0.5,
+            0.57357643635105,
+            0.64278760968654,
+            0.70710678118655,
+            0.76604444311766,
+            0.81915204428612,
+            0.86602540378444,
+            0.90630778703665,
+            0.93969262078591,
+            0.96592582628907,
+            0.98480775301221,
+            0.99619469809175,
+            1.0];
+
+! Lookup sin in first quadrant (0 <= deg <= 90)
+! idx = floor(deg / 5), frac = (deg - idx*5) / 5
+fun sinLookupQ1(deg, table) =
+    lerp (nth i table) (nth (i + 1) table) f
+    where f = (deg - i * 5) / 5
+    where i = intdiv(deg, 5);
+
+! Handle deg=90 edge case (idx+1 would be 10, out of range)
+fun sinQ1(deg, table) =
+    if deg >= 90 then 1.0
+    else sinLookupQ1(deg, table);
+
+! Extend to [0, 360) using symmetry:
+!   sin(180-d) = sin(d), sin(180+d) = -sin(d), sin(360-d) = -sin(d)
+fun sinByTable(deg, table) =
+    if deg < 0 then sinByTable(deg + 360, table)
+    else if deg >= 360 then sinByTable(deg - 360, table)
+    else if deg <= 90 then sinQ1(deg, table)
+    else if deg <= 180 then sinQ1(180 - deg, table)
+    else if deg <= 270 then 0 - sinQ1(deg - 180, table)
+    else 0 - sinQ1(360 - deg, table);
+
+! cos(deg) = sin(90 - deg)
+fun cosByTable(deg, table) = sinByTable(90 - deg, table);
+
+! tan(deg) = sin(deg) / cos(deg)
+fun tanByTable(deg, table) = sinByTable(deg, table) / cosByTable(deg, table);
+
+! ---- Inverse trig by table: reverse lookup with interpolation ----
+! Search sinTable for interval containing v, return degree
+! asinSearch i v table: find i where table[i] <= v < table[i+1]
+fun asinSearch i v table =
+    if null(tail table) then i * 5
+    else if v <= head table then i * 5
+    else if v <= head(tail table) then
+        i * 5 + 5 * (v - head table) / (head(tail table) - head table)
+    else asinSearch (i + 1) v (tail table);
+
+! asinT: returns degrees in [-90, 90]
+fun asinT v =
+    if v < 0 then 0 - asinT(0 - v)
+    else if v >= 1 then 90
+    else asinSearch 0 v sinTable;
+
+fun acosT v = 90 - asinT v;
+fun atanT v = asinT(v / sqrtS(1 + v * v));
+
+! ---- Logarithm by table ----
+! ln values at 1.0, 1.1, 1.2, ..., 2.0 (step 0.1, 11 entries)
+lnTable = [0.0,
+           0.09531017980432,
+           0.18232155679395,
+           0.26236426446749,
+           0.33647223662121,
+           0.40546510810816,
+           0.47000362924573,
+           0.53062825106217,
+           0.58778666490212,
+           0.64185388617239,
+           0.69314718055995];
+
+! lnLookup: interpolate in lnTable for m in [1.0, 2.0]
+fun lnLookupI(m, i) =
+    if i >= 10 then 0.69314718055995
+    else lerp (nth i lnTable) (nth (i + 1) lnTable) f
+        where f = (m - 1 - i * 0.1) / 0.1;
+fun lnLookup m =
+    if m >= 2 then 0.69314718055995
+    else lnLookupI(m, intdiv((m - 1) * 10, 1));
+
+fun lnT x =
+    (snd p * 0.69314718055995 + lnLookup(fst p))
+    where p = lnReduce(x, 0);
+
+fun log10T x = lnT x / 0.69314718055995 * 0.30102999566398;
+
+! ---- Exponential by table ----
+! exp values at 0.0, 0.1, 0.2, ..., 1.0 (step 0.1, 11 entries)
+expTable = [1.0,
+            1.10517091807565,
+            1.22140275816017,
+            1.34985880757600,
+            1.49182469727656,
+            1.64872127070013,
+            1.82211880039051,
+            2.01375270747048,
+            2.22554092670106,
+            2.45960311115695,
+            2.71828182845905];
+
+! expLookup: interpolate in expTable for f in [0, 1]
+fun expLookupI(f, i) =
+    if i >= 10 then 2.71828182845905
+    else lerp (nth i expTable) (nth (i + 1) expTable) t
+        where t = (f - i * 0.1) / 0.1;
+fun expLookup f =
+    if f >= 1 then 2.71828182845905
+    else expLookupI(f, intdiv(f * 10, 1));
+
+! expReduce: split x into integer k + fractional f in [0,1)
+! exp(x) = exp(k) * exp(f) = e^k * tableLookup(f)
+! e^k by repeated squaring: compute via exp(1)^k
+fun powE 0 = 1;
+--- powE n =
+    if n < 0 then 1 / powE(0 - n)
+    else 2.71828182845905 * powE(n - 1);
+
+fun expT x =
+    if x < 0 then 1 / expT(0 - x)
+    else powE k * expLookup(x - k)
+        where k = intdiv(x, 1);
+
+! Convenience wrappers
+fun sinT deg = sinByTable(deg, sinTable);
+fun cosT deg = cosByTable(deg, sinTable);
+fun tanT deg = tanByTable(deg, sinTable);
+
+write "=== Lookup Table with Interpolation ===\n";
+write "(Input in degrees)\n";
+write "sin(0)   = %f\n" (sinT 0);
+write "sin(30)  = %f  (expect 0.5)\n" (sinT 30);
+write "sin(45)  = %f  (expect 0.7071)\n" (sinT 45);
+write "sin(60)  = %f  (expect 0.8660)\n" (sinT 60);
+write "sin(90)  = %f  (expect 1.0)\n" (sinT 90);
+write "sin(180) = %f  (expect 0.0)\n" (sinT 180);
+write "sin(270) = %f  (expect -1.0)\n" (sinT 270);
+write "cos(0)   = %f  (expect 1.0)\n" (cosT 0);
+write "cos(60)  = %f  (expect 0.5)\n" (cosT 60);
+write "cos(90)  = %f  (expect 0.0)\n" (cosT 90);
+write "cos(180) = %f  (expect -1.0)\n" (cosT 180);
+write "tan(45)  = %f  (expect 1.0)\n" (tanT 45);
+write "tan(30)  = %f  (expect 0.5774)\n" (tanT 30);
+write "sin(15)  = %f  (expect 0.2588)\n" (sinT 15);
+write "sin(75)  = %f  (expect 0.9659)\n" (sinT 75);
+write "sin(-30) = %f  (expect -0.5)\n" (sinT(0 - 30));
+write "sin(330) = %f  (expect -0.5)\n" (sinT 330);
+write "asinT(0.5)  = %f°  (expect 30)\n" (asinT 0.5);
+write "asinT(1)    = %f°  (expect 90)\n" (asinT 1);
+write "asinT(-0.5) = %f°  (expect -30)\n" (asinT(0 - 0.5));
+write "acosT(0.5)  = %f°  (expect 60)\n" (acosT 0.5);
+write "acosT(0)    = %f°  (expect 90)\n" (acosT 0);
+write "atanT(1)    = %f°  (expect 45)\n" (atanT 1);
+write "atanT(0)    = %f°  (expect 0)\n" (atanT 0);
+write "atanT(-1)   = %f°  (expect -45)\n" (atanT(0 - 1));
+write "lnT(1)      = %f  (expect 0)\n" (lnT 1);
+write "lnT(2)      = %f  (expect 0.6931)\n" (lnT 2);
+write "lnT(10)     = %f  (expect 2.3026)\n" (lnT 10);
+write "lnT(0.5)    = %f  (expect -0.6931)\n" (lnT 0.5);
+write "log10T(10)  = %f  (expect 1.0)\n" (log10T 10);
+write "log10T(100) = %f  (expect 2.0)\n" (log10T 100);
+write "expT(0)     = %f  (expect 1.0)\n" (expT 0);
+write "expT(1)     = %f  (expect 2.7183)\n" (expT 1);
+write "expT(2)     = %f  (expect 7.3891)\n" (expT 2);
+write "expT(-1)    = %f  (expect 0.3679)\n" (expT(0 - 1));
+
+write "\n=== Comparison: Taylor vs Table ===\n";
+write "sin(45°): Taylor=%f  Table=%f\n" (sinS(pi / 4)) (sinT 45);
+write "cos(60°): Taylor=%f  Table=%f\n" (cosS(pi / 3)) (cosT 60);
+write "tan(30°): Taylor=%f  Table=%f\n" (tanS(pi / 6)) (tanT 30);
+write "asin(0.5):  Taylor=%f rad  Table=%f°\n" (asinS 0.5) (asinT 0.5);
+write "acos(0.5):  Taylor=%f rad  Table=%f°\n" (acosS 0.5) (acosT 0.5);
+write "atan(1):    Taylor=%f rad  Table=%f°\n" (atanS 1) (atanT 1);
+write "ln(10):     Taylor=%f  Table=%f\n" (lnS 10) (lnT 10);
+write "log10(100): Taylor=%f  Table=%f\n" (log10S 100) (log10T 100);
+write "exp(2):     Taylor=%f  Table=%f\n" (expS 2) (expT 2);

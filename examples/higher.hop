@@ -1,0 +1,94 @@
+! higher.hop — Higher-order function examples
+
+write "=== Higher-Order Functions ===\n\n";
+
+! ---- foldr: right fold ----
+fun foldr f z [] = z;
+--- foldr f z (x :: xs) = f(x, foldr f z xs);
+
+! ---- foldl: left fold ----
+fun foldl f z [] = z;
+--- foldl f z (x :: xs) = foldl f (f(z, x)) xs;
+
+! sum and product via fold
+fun sum xs = foldr (+) 0 xs;
+fun product xs = foldr (*) 1 xs;
+
+write "sum [1..10]:     %d\n" (sum (1..10));
+write "product [1..5]:  %d\n" (product (1..5));
+
+! ---- filter ----
+fun filter p [] = [];
+--- filter p (x :: xs) =
+    if p x then x :: filter p xs else filter p xs;
+
+fun even n = n mod 2 == 0;
+fun odd n = n mod 2 != 0;
+
+write "filter even [1..10]: %v\n" (filter even (1..10));
+write "filter odd  [1..10]: %v\n" (filter odd (1..10));
+
+! ---- compose: (f . g) x = f(g(x)) ----
+fun compose f g x = f (g x);
+
+fun double x = 2 * x;
+fun square x = x * x;
+
+write "compose double square 3: %d\n" (compose double square 3);
+write "compose square double 3: %d\n" (compose square double 3);
+
+! ---- twice: apply f two times ----
+fun twice f x = f (f x);
+
+write "twice double 5:  %d\n" (twice double 5);
+write "twice succ 10:   %d\n" (twice succ 10);
+
+! ---- apply n times ----
+fun ntimes 0 f x = x;
+--- ntimes n f x = ntimes (n - 1) f (f x);
+
+write "ntimes 4 double 1: %d\n" (ntimes 4 double 1);
+
+! ---- zipwith: combine two lists with a function ----
+fun zipwith f [] _ = [];
+--- zipwith f _ [] = [];
+--- zipwith f (x :: xs) (y :: ys) = f(x, y) :: zipwith f xs ys;
+
+write "zipwith (+): %v\n" (zipwith (+) (1..5) (11..15));
+write "zipwith (*): %v\n" (zipwith (*) [2,3,4] [10,20,30]);
+
+! ---- takewhile ----
+fun takewhile p [] = [];
+--- takewhile p (x :: xs) =
+    if p x then x :: takewhile p xs else [];
+
+fun lessThan6 n = n < 6;
+
+write "takewhile (<6) [1..10]: %v\n" (takewhile lessThan6 (1..10));
+
+! ---- map with user-defined functions ----
+fun negate x = -x;
+
+write "map double [1..5]:  %v\n" (map double (1..5));
+write "map square [1..5]:  %v\n" (map square (1..5));
+write "map negate [1..5]:  %v\n" (map negate (1..5));
+
+! ---- flip: swap arguments ----
+fun flip f a b = f(b, a);
+
+fun sub(a, b) = a - b;
+
+write "sub(10, 3):        %d\n" (sub(10, 3));
+write "flip sub 10 3:     %d\n" (flip sub 10 3);
+
+! ---- concatmap: map then flatten ----
+fun concatmap f [] = [];
+--- concatmap f (x :: xs) = f x <> concatmap f xs;
+
+fun dup x = [x, x];
+
+write "concatmap dup [1,2,3]: %v\n" (concatmap dup [1, 2, 3]);
+
+! ---- putting it all together ----
+write "\nsum of squares of odd numbers in [1..10] = ";
+write "%d\n" (sum (map square (filter odd (1..10))));

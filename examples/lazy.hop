@@ -1,0 +1,10 @@
+! lazy range + front
+front(10, 1..1000000000);
+front(10, 1..1000000);
+
+! lazy range + map + front
+fun double x = x * 2;
+fun square x = x * x;
+front(10, map double (1..1000000000));
+front(5, map square (1..1000000000));
+front(20, map succ (1..1000000000));

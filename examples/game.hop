@@ -1,0 +1,134 @@
+! game.hop — Tic-Tac-Toe with Minimax AI for hop
+!
+! Board: list of 9 cells, 0=empty, 1=X(human), 2=O(computer)
+! Positions:  0 | 1 | 2
+!             ---------
+!             3 | 4 | 5
+!             ---------
+!             6 | 7 | 8
+!
+! Usage: play([0,0,0, 0,0,0, 0,0,0], 4);
+
+uses lib;
+
+! ---- board operations ----
+
+fun put 0 v (_ :: rest) = v :: rest;
+--- put n v (x :: rest) = x :: put (n - 1) v rest;
+
+fun opp 1 = 2;
+--- opp 2 = 1;
+
+! ---- win detection ----
+
+fun line3 board a b c =
+    (if (p != 0) * (p == q) * (q == r) then p else 0)
+    where p = nth a board
+    where q = nth b board
+    where r = nth c board;
+
+fun fnz [] = 0;
+--- fnz (0 :: rest) = fnz rest;
+--- fnz (x :: _) = x;
+
+fun winner board = fnz [
+    line3 board 0 1 2, line3 board 3 4 5, line3 board 6 7 8,
+    line3 board 0 3 6, line3 board 1 4 7, line3 board 2 5 8,
+    line3 board 0 4 8, line3 board 2 4 6];
+
+! ---- move generation ----
+
+fun emH n [] = [];
+--- emH n (0 :: rest) = n :: emH (n + 1) rest;
+--- emH n (_ :: rest) = emH (n + 1) rest;
+
+fun empties board = emH 0 board;
+
+! ---- alpha-beta minimax ----
+! Returns (best_score, best_pos)
+! alpha: maximiser lower bound  beta: minimiser upper bound
+
+fun alphabeta board player alpha beta =
+    (if w == 2 then (10, 0 - 1)
+     else if w == 1 then (0 - 10, 0 - 1)
+     else if null(empties board) then (0, 0 - 1)
+     else if player == 2
+          then maxSearch board alpha beta (0 - 1) (empties board)
+          else minSearch board alpha beta (0 - 1) (empties board))
+    where w = winner board;
+
+! Maximiser (O = player 2): prune when score >= beta
+fun maxSearch board alpha beta bestPos [] = (alpha, bestPos);
+--- maxSearch board alpha beta bestPos (pos :: rest) =
+    (if score >= beta then (score, pos)
+     else maxSearch board (max(alpha, score)) beta
+                    (if score > alpha then pos else bestPos) rest)
+    where score = fst (alphabeta (put pos 2 board) 1 alpha beta);
+
+! Minimiser (X = player 1): prune when score <= alpha
+fun minSearch board alpha beta bestPos [] = (beta, bestPos);
+--- minSearch board alpha beta bestPos (pos :: rest) =
+    (if score <= alpha then (score, pos)
+     else minSearch board alpha (min(beta, score))
+                    (if score < beta then pos else bestPos) rest)
+    where score = fst (alphabeta (put pos 1 board) 2 alpha beta);
+
+! ---- play: human X at pos, computer O responds ----
+
+fun play(board, pos) =
+    if winner board != 0 then board
+    else if nth pos board != 0 then board
+    else compMove(put pos 1 board);
+
+fun compMove board =
+    if winner board != 0 then board
+    else if null(empties board) then board
+    else put (snd(alphabeta board 2 (0 - 11) 11)) 2 board;
+
+! ---- display ----
+
+fun ch 0 = '.';
+--- ch 1 = 'X';
+--- ch 2 = 'O';
+
+fun showBoard board =
+    [' ', ch(nth 0 board), ' ', ch(nth 1 board), ' ', ch(nth 2 board), '\n',
+     ' ', ch(nth 3 board), ' ', ch(nth 4 board), ' ', ch(nth 5 board), '\n',
+     ' ', ch(nth 6 board), ' ', ch(nth 7 board), ' ', ch(nth 8 board), '\n'];
+
+fun showNum n = [n + '0'];
+
+fun status board =
+    if winner board == 1 then "=> X wins!\n"
+    else if winner board == 2 then "=> O wins!\n"
+    else if null(empties board) then "=> Draw!\n"
+    else "";
+
+! ---- build game transcript as a string ----
+
+fun gameStr board [] = showBoard board <> status board;
+--- gameStr board (pos :: rest) =
+    if winner board != 0 then showBoard board <> status board
+    else if null(empties board) then showBoard board <> status board
+    else if nth pos board != 0 then gameStr board rest
+    else "X plays " <> showNum pos <> ":\n"
+         <> showBoard h <> status h <> compStr h rest
+    where h = put pos 1 board;
+
+fun compStr board rest =
+    if winner board != 0 then ""
+    else if null(empties board) then ""
+    else "\nO responds:\n" <> showBoard c <> status c <> cont c rest
+    where c = put (snd(alphabeta board 2 (0 - 11) 11)) 2 board;
+
+fun cont board rest =
+    if winner board != 0 then ""
+    else if null(empties board) then ""
+    else "\n" <> gameStr board rest;
+
+! ===== Demo =====
+
+write "=== Tic-Tac-Toe ===\n";
+write "X = Human, O = Computer (minimax)\n\n";
+
+write "%s" (gameStr [0,0,0, 0,0,0, 0,0,0] [4, 0, 2, 6, 8, 1, 3, 5, 7]);
