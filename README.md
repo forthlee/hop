@@ -149,7 +149,3 @@ See [manual.md](manual.md) for full documentation.
 ## Acknowledgments
 
 The interpreter is based on [dmbaturin/hope](https://github.com/dmbaturin/hope).
-
-## License
-
-Public domain.
