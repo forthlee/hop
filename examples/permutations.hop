@@ -4,13 +4,13 @@ fun mapCons(x, nil)    = nil;
 fun pickEach nil      = nil;
 --- pickEach(h :: t)  = (h, t) :: mapConsPairs(h, pickEach t);
 
-fun mapConsPairs(h, nil)          = nil;
+fun mapConsPairs(h, nil)           = nil;
 --- mapConsPairs(h, (x, rem) :: t) = (x, h :: rem) :: mapConsPairs(h, t);
 
 fun permute nil = nil :: nil;
 --- permute lst = processChoices(pickEach lst);
 
-fun processChoices nil = nil;
+fun processChoices nil            = nil;
 --- processChoices((x, rem) :: t) = mapCons(x, permute rem) <> processChoices t;
 
 fun combine(0, _)      = nil :: nil;
