@@ -15,9 +15,7 @@ fun processChoices nil            = nil;
 
 fun combine(0, _)      = nil :: nil;
 --- combine(k, nil)    = nil;
---- combine(k, h :: t) = 
-        mapCons(h, combine(k - 1, t))
-        <> combine(k, t);
+--- combine(k, h :: t) = mapCons(h, combine(k - 1, t)) <> combine(k, t);
 
 lis = [1, 2, 3];
 permute(lis);
