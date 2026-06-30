@@ -46,7 +46,7 @@ fact 10;    ! 3628800
 ```hope
 fun partition(p, []) = ([], []);
 --- partition(p, x :: xs) =
-    (if x < p then (x :: fst r, snd r) else (fst r, x :: snd r))
+    if x < p then (x :: fst r, snd r) else (fst r, x :: snd r)
     where r = partition(p, xs);
 
 fun qsort [] = [];
