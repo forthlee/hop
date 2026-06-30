@@ -26,6 +26,7 @@ evaluation, infinite lists, higher-order functions, and a module system.
 16. [Garbage Collection](#16-garbage-collection)
 17. [Educational Math Demo (`math_edu.hop`)](#17-educational-math-demo-math_eduhop)
 18. [Programming Pitfalls](#18-programming-pitfalls)
+19. [Unsupported Hope Features](#19-unsupported-hope-features)
 
 ---
 
@@ -72,6 +73,27 @@ double 21;            ! prints 42
 | `true`      | Boolean true (value `1`)                         |
 | `false`     | Boolean false (value `0`)                        |
 | `mod`       | Modulo operator                                  |
+
+### Ignored Declarations
+
+The following top-level keywords are recognized by the parser but
+**silently skipped** — they produce no effect at runtime. They exist
+so that source files written for the full Hope language can be loaded
+without errors:
+
+| Keyword    | Meaning in Hope                        |
+|------------|----------------------------------------|
+| `dec`      | Type signature declaration             |
+| `typevar`  | Type variable declaration              |
+| `infix`    | Left-associative infix operator        |
+| `infixr`   | Right-associative infix operator       |
+| `data`     | Algebraic data type definition         |
+| `abstype`  | Abstract type definition               |
+| `type`     | Type alias definition                  |
+| `private`  | Visibility / access modifier           |
+
+Each ignored declaration is consumed up to and including the next `;`,
+then parsing continues normally.
 
 ### Comments
 
@@ -1002,3 +1024,152 @@ write "%d\n" fact 10;          ! WRONG — fact and 10 are two args
 `[1, 2, 3]` is sugar for `1 :: 2 :: 3 :: []`. Patterns follow the same
 expansion, so `[x]` matches a one-element list, `[x, y]` matches exactly
 two elements, etc.
+
+---
+
+## 19. Unsupported Hope Features
+
+Hop is a **minimal** interpreter (one C file). The features below exist
+in the original Hope language but are absent from hop by design — adding
+them would require structural changes to the evaluator or a type system
+that hop deliberately omits.
+
+### 19.1 Lambda / Anonymous Functions
+
+Hope supports anonymous functions (`\x -> expr`). Hop has no such
+syntax. Every function must be defined at the top level with `fun`.
+
+**Workaround:** define a named helper function.
+
+```hope
+! HOPE (not valid in hop)
+map (\x -> x * 2) [1, 2, 3];
+
+! HOP
+fun double x = x * 2;
+map double [1, 2, 3];
+```
+
+**Why absent:** hop stores all functions in a global name table. Supporting
+closures would require a new value type that captures the definition-time
+environment, significantly complicating the evaluator.
+
+### 19.2 `let...in` Expressions
+
+Hope has `let x = ... in ...`. Hop only has `where` / `whererec`.
+
+**Workaround:** use `where` — it is semantically equivalent for all
+practical purposes.
+
+**Why absent:** `where` already covers the use case; adding `let...in`
+would be redundant complexity.
+
+### 19.3 List Comprehensions
+
+Hope supports `[f x | x <- xs, p x]`. Hop has no comprehension syntax.
+
+**Workaround:** use `map` and `filter` from `lib.hop`.
+
+```hope
+uses lib;
+! [x * x | x <- 1..10, odd x]  — not valid in hop
+map (\x -> x * x) (filter odd (1..10));   ! also invalid (lambda)
+
+fun sq x = x * x;
+map sq (filter odd (1..10));              ! OK
+```
+
+**Why absent:** comprehensions are syntactic sugar over `map`/`filter`/
+`concatMap`, which are already available in the standard library.
+
+### 19.4 Tuples Beyond Pairs
+
+Hope supports arbitrary n-tuples: `(a, b, c)`. Hop only supports
+2-element pairs; a third comma in a parenthesised expression is a
+parse error.
+
+**Workaround:** nest pairs.
+
+```hope
+(1, (2, 3));      ! simulates a triple
+```
+
+**Why absent:** the `V_PAIR` value type uses two fixed pointers (`fst`,
+`snd`). Generalising to n-tuples would require a dynamic array
+representation and a revised pattern matcher.
+
+### 19.5 As-Patterns
+
+Hope allows binding a name to a value while also destructuring it
+(`xs @ (x :: rest)`). The `@` character is not meaningful in hop.
+
+**Workaround:** bind the whole value in one clause, then extract parts
+with `where`.
+
+```hope
+fun f xs = head xs + length xs
+    where h = head xs;
+```
+
+**Why absent:** would require a new `Pat` node type and extra bindings in
+the pattern matcher — a minor but unnecessary addition for hop's scope.
+
+### 19.6 Negative Literal Patterns
+
+Patterns like `fun f (-1) = ...` are not supported. The pattern parser
+only recognises non-negative number literals.
+
+**Workaround:** match a variable and guard with `if`.
+
+```hope
+fun f n = if n == -1 then ... else ...;
+```
+
+**Why absent:** the pattern parser does not handle a leading `-` sign;
+adding it is a small but omitted change.
+
+### 19.7 Algebraic Data Types and User-Defined Constructors
+
+`data` declarations are silently skipped (see Section 2). As a result,
+no user-defined constructors exist at runtime — they cannot appear in
+expressions or patterns.
+
+**Workaround:** encode variants with numbers or tagged pairs.
+
+```hope
+! data Shape = Circle | Rect  — skipped, constructors unavailable
+! Encode manually: 0 = circle, 1 = rect
+fun area (0, r)      = pi * r * r;
+--- area (1, (w, h)) = w * h;
+```
+
+**Why absent:** supporting constructors requires registering them at
+parse time, a new tagged-union value type, and constructor-aware pattern
+matching — a structural extension inconsistent with the minimal design.
+
+### 19.8 Type Classes
+
+`class`, `instance`, and `deriving` declarations are not in the
+silence list — they are unrecognised identifiers that will cause a
+**parse error** if encountered.
+
+**Why absent:** type classes require a static type system and
+dictionary-passing at the call site. Hop has no type checker; at
+runtime there is no "type" level at which to dispatch.
+
+### 19.9 Qualified Module Names
+
+`uses` merges all loaded definitions into a single flat global namespace.
+There is no `Module.function` syntax for qualified access.
+
+**Why absent:** implementing namespaces would require prefixed name
+lookup or a layered scope structure in the evaluator — beyond hop's
+flat function-table design.
+
+### 19.10 Module Visibility
+
+`private` declarations are silently skipped. Every definition loaded
+via `uses` is unconditionally visible to all subsequent code.
+
+**Why absent:** visibility control is a module-system feature; hop's
+`uses` is purely additive file loading with no isolation mechanism.
