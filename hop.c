@@ -12,16 +12,60 @@
 #include <stdarg.h>
 #include <time.h>
 #include <math.h>
+#include <stdint.h>
 #include "fenster.h"
 #define FENSTER_AUDIO_BUFSZ 1024
 #include "fenster_audio.h"
 
 static jmp_buf err_jmp;
 static int err_recovery;  /* if set, longjmp instead of exit */
-static const char *src_file = "";        /* current source file name */
-static int tok_line = 1, tok_col = 0;    /* position of current token */
-static int cur_end_line = 1, cur_end_col = 0;   /* end of current token */
-static int prev_end_line = 1, prev_end_col = 0; /* end of previous token */
+
+/* ===== Token types ===== */
+enum {
+    T_NUM, T_ID, T_STR,
+    T_PLUS, T_MINUS, T_STAR, T_SLASH, T_MOD,
+    T_LT, T_GT, T_EQ, T_LE, T_GE, T_NE,
+    T_LPAREN, T_RPAREN, T_COMMA, T_SEMI,
+    T_COLON, T_ARROW, T_VALOF, T_FUN, T_IS,
+    T_CONS, T_DOTDOT, T_BAR, T_BAR2, T_APPEND,
+    T_LBRACKET, T_RBRACKET, T_HASH,
+    T_NOT, T_AND, T_OR,
+    T_EOF
+};
+
+typedef struct {
+    FILE *src; int ch, tok, pb_valid, pb_tok;
+    double tok_num, pb_num;
+    char tok_id[128], pb_id[128], tok_str[4096];
+    const char *tok_id_interned, *pb_id_interned;
+    int src_line, src_col, tok_line, tok_col;
+    int cur_end_line, cur_end_col, prev_end_line, prev_end_col;
+    const char *src_file;
+} LexState;
+
+static LexState L = { .src_file = "", .src_line = 1, .tok_line = 1, .cur_end_line = 1, .prev_end_line = 1 };
+
+#define src             L.src
+#define ch              L.ch
+#define tok             L.tok
+#define tok_num         L.tok_num
+#define tok_id          L.tok_id
+#define tok_str         L.tok_str
+#define pb_valid        L.pb_valid
+#define pb_tok          L.pb_tok
+#define pb_num          L.pb_num
+#define pb_id           L.pb_id
+#define tok_id_interned L.tok_id_interned
+#define pb_id_interned  L.pb_id_interned
+#define src_line        L.src_line
+#define src_col         L.src_col
+#define src_file        L.src_file
+#define tok_line        L.tok_line
+#define tok_col         L.tok_col
+#define cur_end_line    L.cur_end_line
+#define cur_end_col     L.cur_end_col
+#define prev_end_line   L.prev_end_line
+#define prev_end_col    L.prev_end_col
 
 _Noreturn static void die(const char *msg) {
     fprintf(stderr, "%s(%d:%d) %s\n", src_file, tok_line, tok_col, msg);
@@ -36,6 +80,115 @@ _Noreturn static void dief(const char *fmt, ...) {
 
 #define ALLOC(T) ((T *)calloc(1, sizeof(T)))
 
+/* ===== String Interning ===== */
+#define INTERN_BUCKETS 1024
+typedef struct InternEntry { const char *str; struct InternEntry *next; } InternEntry;
+static InternEntry *intern_buckets[INTERN_BUCKETS];
+
+static unsigned intern_hash(const char *s) {
+    unsigned h = 5381;
+    for (; *s; s++) h = h * 33 + (unsigned char)*s;
+    return h;
+}
+
+static const char *intern(const char *s) {
+    unsigned h = intern_hash(s) % INTERN_BUCKETS;
+    for (InternEntry *e = intern_buckets[h]; e; e = e->next)
+        if (!strcmp(e->str, s)) return e->str;
+    InternEntry *e = malloc(sizeof(InternEntry));
+    e->str = strdup(s);
+    e->next = intern_buckets[h];
+    intern_buckets[h] = e;
+    return e->str;
+}
+
+/* Pre-interned symbol names */
+static const char *S_then, *S_else, *S_where, *S_whererec, *S_dec, *S_uses;
+static const char *S_nil, *S_true, *S_false, *S_if, *S_mod, *S_fun;
+static const char *S_not, *S_and, *S_or;
+static const char *S_typevar, *S_infix, *S_infixr, *S_data, *S_abstype, *S_type, *S_private, *S_write;
+static const char *S_sin, *S_cos, *S_tan, *S_asin, *S_acos, *S_atan, *S_atan2;
+static const char *S_exp, *S_log, *S_log10, *S_sqrt, *S_pow, *S_floor, *S_ceil, *S_fabs, *S_pi;
+static const char *S_map, *S_head, *S_tail, *S_succ, *S_front, *S_length, *S_nth;
+static const char *S_xor, *S_fst, *S_snd, *S_rand, *S_srand, *S_timeseed;
+static const char *S_array, *S_aget, *S_alen, *S_aset, *S_amake, *S_tabulate, *S_amap;
+static const char *S_gopen, *S_gclose, *S_gplot, *S_gclear, *S_gloop, *S_gsync;
+static const char *S_gwidth, *S_gheight, *S_gmouse, *S_gkey, *S_gline, *S_gcircle;
+static const char *S_gtext, *S_gscale, *S_gpen, *S_gtitle, *S_gblit, *S_gdrawcol;
+static const char *S_gkeyevent, *S_gbeep, *S_gclick, *S_gsave, *S_grestore;
+static const char *S_underscore;
+
+static void intern_init(void) {
+    S_then=intern("then"); S_else=intern("else"); S_where=intern("where"); S_whererec=intern("whererec");
+    S_dec=intern("dec"); S_uses=intern("uses"); S_nil=intern("nil"); S_true=intern("true"); S_false=intern("false");
+    S_if=intern("if"); S_mod=intern("mod"); S_fun=intern("fun"); S_not=intern("not"); S_and=intern("and"); S_or=intern("or");
+    S_typevar=intern("typevar"); S_infix=intern("infix"); S_infixr=intern("infixr");
+    S_data=intern("data"); S_abstype=intern("abstype"); S_type=intern("type"); S_private=intern("private"); S_write=intern("write");
+    S_sin=intern("sin"); S_cos=intern("cos"); S_tan=intern("tan");
+    S_asin=intern("asin"); S_acos=intern("acos"); S_atan=intern("atan"); S_atan2=intern("atan2");
+    S_exp=intern("exp"); S_log=intern("log"); S_log10=intern("log10"); S_sqrt=intern("sqrt"); S_pow=intern("pow");
+    S_floor=intern("floor"); S_ceil=intern("ceil"); S_fabs=intern("fabs"); S_pi=intern("pi");
+    S_map=intern("map"); S_head=intern("head"); S_tail=intern("tail"); S_succ=intern("succ");
+    S_front=intern("front"); S_length=intern("length"); S_nth=intern("nth");
+    S_xor=intern("xor"); S_fst=intern("fst"); S_snd=intern("snd");
+    S_rand=intern("rand"); S_srand=intern("srand"); S_timeseed=intern("timeseed");
+    S_array=intern("array"); S_aget=intern("aget"); S_alen=intern("alen"); S_aset=intern("aset");
+    S_amake=intern("amake"); S_tabulate=intern("tabulate"); S_amap=intern("amap");
+    S_gopen=intern("gopen"); S_gclose=intern("gclose"); S_gplot=intern("gplot"); S_gclear=intern("gclear");
+    S_gloop=intern("gloop"); S_gsync=intern("gsync"); S_gwidth=intern("gwidth"); S_gheight=intern("gheight");
+    S_gmouse=intern("gmouse"); S_gkey=intern("gkey"); S_gline=intern("gline"); S_gcircle=intern("gcircle");
+    S_gtext=intern("gtext"); S_gscale=intern("gscale"); S_gpen=intern("gpen"); S_gtitle=intern("gtitle");
+    S_gblit=intern("gblit"); S_gdrawcol=intern("gdrawcol"); S_gkeyevent=intern("gkeyevent");
+    S_gbeep=intern("gbeep"); S_gclick=intern("gclick"); S_gsave=intern("gsave"); S_grestore=intern("grestore");
+    S_underscore=intern("_");
+}
+
+/* ===== Builtin Registry ===== */
+enum { BF_FUN = 1, BF_GFX = 2, BF_PRIO = 4 };
+#define BUILTIN_HASH_SIZE 128
+typedef struct { const char *name; int flags; } BuiltinInfo;
+static BuiltinInfo builtin_hash[BUILTIN_HASH_SIZE];
+
+static void builtin_register(const char *name, int flags) {
+    unsigned h = ((uintptr_t)name >> 3) % BUILTIN_HASH_SIZE;
+    while (builtin_hash[h].name) {
+        if (builtin_hash[h].name == name) { builtin_hash[h].flags |= flags; return; }
+        h = (h + 1) % BUILTIN_HASH_SIZE;
+    }
+    builtin_hash[h].name = name;
+    builtin_hash[h].flags = flags;
+}
+
+static int builtin_flags(const char *name) {
+    unsigned h = ((uintptr_t)name >> 3) % BUILTIN_HASH_SIZE;
+    while (builtin_hash[h].name) {
+        if (builtin_hash[h].name == name) return builtin_hash[h].flags;
+        h = (h + 1) % BUILTIN_HASH_SIZE;
+    }
+    return 0;
+}
+
+static void builtin_init(void) {
+    /* math builtins (priority - can't be shadowed by user bindings) */
+    const char *math_funs[] = { S_sin, S_cos, S_tan, S_asin, S_acos, S_atan, S_atan2,
+                                 S_exp, S_log, S_log10, S_sqrt, S_pow, S_floor, S_ceil, S_fabs, NULL };
+    for (const char **p = math_funs; *p; p++) builtin_register(*p, BF_FUN | BF_PRIO);
+    builtin_register(S_pi, BF_PRIO);  /* constant, not BF_FUN */
+
+    /* core builtins */
+    const char *core_funs[] = { S_map, S_head, S_tail, S_succ, S_front, S_length, S_nth,
+                                 S_xor, S_fst, S_snd, S_rand, S_srand,
+                                 S_array, S_aget, S_alen, S_aset, S_amake, S_tabulate, S_amap, NULL };
+    for (const char **p = core_funs; *p; p++) builtin_register(*p, BF_FUN);
+
+    /* graphics builtins */
+    const char *gfx_funs[] = { S_gopen, S_gclose, S_gplot, S_gclear, S_gloop, S_gsync,
+                                S_gwidth, S_gheight, S_gmouse, S_gkey, S_gline, S_gcircle,
+                                S_gtext, S_gscale, S_gpen, S_gtitle, S_gblit, S_gdrawcol,
+                                S_gkeyevent, S_gbeep, S_gclick, S_gsave, S_grestore, NULL };
+    for (const char **p = gfx_funs; *p; p++) builtin_register(*p, BF_FUN | BF_GFX);
+}
+
 /* ===== Values (with lazy thunks) ===== */
 typedef struct Val Val;
 typedef struct Env Env;
@@ -47,20 +200,24 @@ enum { V_NUM, V_NIL, V_CONS, V_PAIR, V_SEC, V_FUN, V_THUNK, V_ARR };
 struct Val {
     int    tag;
     char   gc_mark;
-    double num;
-    Val   *hd, *tl;         /* V_CONS; V_ARR reuses: hd=(Val**)arr, tl=unused */
-    Val   *fst, *snd;       /* V_PAIR */
-    int    op;              /* V_SEC; V_ARR reuses: op=arr_len */
-    const char *name;       /* V_FUN */
-    Expr  *thunk_expr;      /* V_THUNK (expression thunk) */
-    Env   *thunk_env;
-    CThunkFn thunk_fn;      /* V_THUNK (C thunk) */
-    void  *thunk_data;
+    union {
+        double num;                                /* V_NUM */
+        struct { Val *hd, *tl; } cons;             /* V_CONS */
+        struct { Val *fst, *snd; } pair;           /* V_PAIR */
+        int sec_op;                                /* V_SEC */
+        const char *name;                          /* V_FUN */
+        struct {                                   /* V_THUNK */
+            Expr *expr;
+            Env  *env;
+            CThunkFn fn;
+            void *data;
+        } thunk;
+        struct { Val **data; int len; } arr;       /* V_ARR */
+    } u;
 };
 
-/* V_ARR layout: hd=(Val**) array data pointer, op=length */
-#define ARR(v)    ((Val**)(v)->hd)
-#define ARRLEN(v) ((v)->op)
+#define ARR(v)    ((v)->u.arr.data)
+#define ARRLEN(v) ((v)->u.arr.len)
 
 struct Env { const char *name; Val *val; Env *next; char gc_mark; };
 
@@ -104,13 +261,13 @@ static void gc_mark_val(Val *v) {
     if (!v || !is_val_ptr(v) || v->gc_mark) return;
     v->gc_mark = 1;
     switch (v->tag) {
-    case V_CONS: gc_mark_val(v->hd); gc_mark_val(v->tl); break;
-    case V_PAIR: gc_mark_val(v->fst); gc_mark_val(v->snd); break;
+    case V_CONS: gc_mark_val(v->u.cons.hd); gc_mark_val(v->u.cons.tl); break;
+    case V_PAIR: gc_mark_val(v->u.pair.fst); gc_mark_val(v->u.pair.snd); break;
     case V_THUNK:
-        gc_mark_env(v->thunk_env);
-        if (v->thunk_data) {
+        gc_mark_env(v->u.thunk.env);
+        if (v->u.thunk.data) {
             /* scan thunk_data (MapD/ZipD) conservatively — 4 words */
-            void **words = (void **)v->thunk_data;
+            void **words = (void **)v->u.thunk.data;
             for (int i = 0; i < 4; i++) {
                 if (is_val_ptr(words[i])) gc_mark_val((Val*)words[i]);
                 if (is_env_ptr(words[i])) gc_mark_env((Env*)words[i]);
@@ -160,8 +317,10 @@ static void gc_collect(void) {
     int val_alive = 0;
     for (int i = 0; i < val_pool_used; i++) {
         if (!val_pool[i].gc_mark) {
-            if (val_pool[i].tag == V_ARR && val_pool[i].hd)
-                free(val_pool[i].hd);
+            if (val_pool[i].tag == V_ARR && val_pool[i].u.arr.data)
+                free(val_pool[i].u.arr.data);
+            if (val_pool[i].tag == V_THUNK && val_pool[i].u.thunk.data)
+                free(val_pool[i].u.thunk.data);
             *(Val**)&val_pool[i] = val_free_list;
             val_free_list = &val_pool[i];
         } else val_alive++;
@@ -213,37 +372,39 @@ static Val val_nil_s = { .tag = V_NIL };
 static Val *val_nil = &val_nil_s;
 
 static Val *vnum(double n) {
-    Val *v = val_alloc(); v->tag = V_NUM; v->num = n; return v;
+    Val *v = val_alloc(); v->tag = V_NUM; v->u.num = n; return v;
 }
 static Val *vcons(Val *h, Val *t) {
-    Val *v = val_alloc(); v->tag = V_CONS; v->hd = h; v->tl = t; return v;
+    Val *v = val_alloc(); v->tag = V_CONS; v->u.cons.hd = h; v->u.cons.tl = t; return v;
 }
 static Val *vpair(Val *a, Val *b) {
-    Val *v = val_alloc(); v->tag = V_PAIR; v->fst = a; v->snd = b; return v;
+    Val *v = val_alloc(); v->tag = V_PAIR; v->u.pair.fst = a; v->u.pair.snd = b; return v;
 }
 static Val *vsec(int op) {
-    Val *v = val_alloc(); v->tag = V_SEC; v->op = op; return v;
+    Val *v = val_alloc(); v->tag = V_SEC; v->u.sec_op = op; return v;
 }
 static Val *vfun(const char *n) {
-    Val *v = val_alloc(); v->tag = V_FUN; v->name = n; return v;
+    Val *v = val_alloc(); v->tag = V_FUN; v->u.name = n; return v;
 }
 static Val *mkthunk_e(Expr *expr, Env *env) {
     Val *v = val_alloc(); v->tag = V_THUNK;
-    v->thunk_expr = expr; v->thunk_env = env; return v;
+    v->u.thunk.expr = expr; v->u.thunk.env = env; return v;
 }
 static Val *mkthunk_c(CThunkFn fn, void *data) {
     Val *v = val_alloc(); v->tag = V_THUNK;
-    v->thunk_fn = fn; v->thunk_data = data; return v;
+    v->u.thunk.fn = fn; v->u.thunk.data = data; return v;
 }
 
 static Val *eval(Expr *e, Env *env);
 
 static Val *force(Val *v) {
     while (v->tag == V_THUNK) {
+        void *data = v->u.thunk.data;
         Val *r;
-        if (v->thunk_fn) r = v->thunk_fn(v->thunk_data);
-        else              r = eval(v->thunk_expr, v->thunk_env);
+        if (v->u.thunk.fn) r = v->u.thunk.fn(data);
+        else               r = eval(v->u.thunk.expr, v->u.thunk.env);
         *v = *r;
+        free(data); /* free MapD/ZipD/RangeD (NULL is safe) */
     }
     return v;
 }
@@ -251,27 +412,27 @@ static Val *force(Val *v) {
 /* write_chars: print a char list or a lazy list of char lists (strings) */
 static void write_chars(Val *v) {
     while ((v = force(v))->tag == V_CONS) {
-        Val *h = force(v->hd);
+        Val *h = force(v->u.cons.hd);
         if (h->tag == V_CONS || h->tag == V_NIL)
             write_chars(h);   /* nested string */
         else
-            putchar((int)h->num);
-        v = v->tl;
+            putchar((int)h->u.num);
+        v = v->u.cons.tl;
     }
 }
 
 static void print_val(Val *v);
 static void print_list(Val *v) {
-    print_val(v->hd);
-    Val *t = force(v->tl);
+    print_val(v->u.cons.hd);
+    Val *t = force(v->u.cons.tl);
     if (t->tag == V_CONS) { printf(", "); print_list(t); }
 }
 static int is_string(Val *v) {
-    for (Val *p = v; p->tag == V_CONS; p = force(p->tl)) {
-        Val *h = force(p->hd);
+    for (Val *p = v; p->tag == V_CONS; p = force(p->u.cons.tl)) {
+        Val *h = force(p->u.cons.hd);
         if (h->tag != V_NUM) return 0;
-        long c = (long)h->num;
-        if (h->num != c || c < 32 || c > 255) return 0;
+        long c = (long)h->u.num;
+        if (h->u.num != c || c < 32 || c > 255) return 0;
     }
     return v->tag == V_CONS; /* non-empty */
 }
@@ -279,23 +440,23 @@ static void print_val(Val *v) {
     v = force(v);
     switch (v->tag) {
     case V_NUM:
-        if (v->num == (long)v->num && v->num > -1e15 && v->num < 1e15)
-            printf("%ld", (long)v->num);
-        else printf("%.15g", v->num);
+        if (v->u.num == (long)v->u.num && v->u.num > -1e15 && v->u.num < 1e15)
+            printf("%ld", (long)v->u.num);
+        else printf("%.15g", v->u.num);
         break;
     case V_NIL:  printf("[]"); break;
     case V_CONS:
         if (is_string(v)) {
             printf("\"");
-            for (Val *p=v; p->tag==V_CONS; p=force(p->tl))
-                putchar((int)force(p->hd)->num);
+            for (Val *p=v; p->tag==V_CONS; p=force(p->u.cons.tl))
+                putchar((int)force(p->u.cons.hd)->u.num);
             printf("\"");
         } else { printf("["); print_list(v); printf("]"); }
         break;
-    case V_PAIR: printf("("); print_val(v->fst); printf(", ");
-                 print_val(v->snd); printf(")"); break;
+    case V_PAIR: printf("("); print_val(v->u.pair.fst); printf(", ");
+                 print_val(v->u.pair.snd); printf(")"); break;
     case V_SEC:  printf("<section>"); break;
-    case V_FUN:  printf("<function %s>", v->name); break;
+    case V_FUN:  printf("<function %s>", v->u.name); break;
     case V_ARR:
         printf("[|");
         for (int i = 0; i < ARRLEN(v); i++) {
@@ -308,60 +469,10 @@ static void print_val(Val *v) {
 }
 
 /* ===== Lexer ===== */
-enum {
-    T_NUM, T_ID, T_STR,
-    T_PLUS, T_MINUS, T_STAR, T_SLASH, T_MOD,
-    T_LT, T_GT, T_EQ, T_LE, T_GE, T_NE,
-    T_LPAREN, T_RPAREN, T_COMMA, T_SEMI,
-    T_COLON, T_ARROW, T_VALOF, T_FUN, T_IS,
-    T_CONS, T_DOTDOT, T_BAR, T_BAR2, T_APPEND,
-    T_LBRACKET, T_RBRACKET, T_HASH,
-    T_NOT, T_AND, T_OR,
-    T_EOF
-};
-
-typedef struct {
-    FILE *src; int ch, tok, pb_valid, pb_tok;
-    double tok_num, pb_num;
-    char tok_id[128], pb_id[128], tok_str[4096];
-    int src_line, src_col, tok_line, tok_col;
-    int cur_end_line, cur_end_col, prev_end_line, prev_end_col;
-    const char *src_file;
-} LexState;
-
-static FILE *src;
-static int ch;
-static int tok;
-static double tok_num;
-static char tok_id[128];
-static char tok_str[4096];
-static int pb_valid, pb_tok;
-static double pb_num;
-static char pb_id[128];
 static char src_dir[1024];  /* directory of main source file */
-static int src_line = 1, src_col = 0;  /* current position in source */
 
-static void lex_save(LexState *s) {
-    s->src=src; s->ch=ch; s->tok=tok; s->tok_num=tok_num;
-    memcpy(s->tok_id,tok_id,sizeof tok_id); memcpy(s->pb_id,pb_id,sizeof pb_id);
-    memcpy(s->tok_str,tok_str,sizeof tok_str);
-    s->pb_valid=pb_valid; s->pb_tok=pb_tok; s->pb_num=pb_num;
-    s->src_line=src_line; s->src_col=src_col;
-    s->tok_line=tok_line; s->tok_col=tok_col;
-    s->cur_end_line=cur_end_line; s->cur_end_col=cur_end_col;
-    s->prev_end_line=prev_end_line; s->prev_end_col=prev_end_col;
-    s->src_file=src_file;
-}
-static void lex_restore(const LexState *s) {
-    src=s->src; ch=s->ch; tok=s->tok; tok_num=s->tok_num;
-    memcpy(tok_id,s->tok_id,sizeof tok_id); memcpy(pb_id,s->pb_id,sizeof pb_id);
-    memcpy(tok_str,s->tok_str,sizeof tok_str);
-    pb_valid=s->pb_valid; pb_tok=s->pb_tok; pb_num=s->pb_num;
-    src_line=s->src_line; src_col=s->src_col;
-    tok_line=s->tok_line; tok_col=s->tok_col;
-    cur_end_line=s->cur_end_line; cur_end_col=s->cur_end_col;
-    prev_end_line=s->prev_end_line; prev_end_col=s->prev_end_col;
-    src_file=s->src_file;
+static void lex_save(LexState *s) { *s = L; }
+static void lex_restore(const LexState *s) { L = *s;
 }
 
 #define MAX_MODULES 64
@@ -455,11 +566,12 @@ static void scan_inner(void) {
         tok = T_ID; int i = 0;
         while (isalnum(ch) || ch == '_' || ch == '\'') { if (i<126) tok_id[i++]=ch; readch(); }
         tok_id[i] = 0;
-        if (!strcmp(tok_id,"mod")) tok = T_MOD;
-        if (!strcmp(tok_id,"fun")) tok = T_FUN;
-        if (!strcmp(tok_id,"not")) tok = T_NOT;
-        if (!strcmp(tok_id,"and")) tok = T_AND;
-        if (!strcmp(tok_id,"or"))  tok = T_OR;
+        tok_id_interned = intern(tok_id);
+        if (tok_id_interned == S_mod) tok = T_MOD;
+        if (tok_id_interned == S_fun) tok = T_FUN;
+        if (tok_id_interned == S_not) tok = T_NOT;
+        if (tok_id_interned == S_and) tok = T_AND;
+        if (tok_id_interned == S_or)  tok = T_OR;
         return;
     }
     switch (ch) {
@@ -523,7 +635,7 @@ static void scan_inner(void) {
 static void scan(void) {
     if (pb_valid) {
         pb_valid = 0; tok = pb_tok; tok_num = pb_num;
-        memcpy(tok_id, pb_id, sizeof(tok_id)); return;
+        memcpy(tok_id, pb_id, sizeof(tok_id)); tok_id_interned = pb_id_interned; return;
     }
     prev_end_line = cur_end_line; prev_end_col = cur_end_col;
     scan_inner();
@@ -532,7 +644,7 @@ static void scan(void) {
 
 static void pushback(void) {
     pb_valid=1; pb_tok=tok; pb_num=tok_num;
-    memcpy(pb_id, tok_id, sizeof(tok_id));
+    memcpy(pb_id, tok_id, sizeof(tok_id)); pb_id_interned = tok_id_interned;
 }
 static void expect(int t) {
     if (tok!=t) {
@@ -553,7 +665,7 @@ struct Expr {
     int    line, col;         /* source position */
     const char *file;         /* source file */
     double num;
-    char   name[128];
+    const char *name;
     int    op;
     Expr  *l, *r;
     Expr  *cond, *then_e, *else_e;
@@ -564,7 +676,7 @@ struct Expr {
 
 static Expr *mkexpr(int t) { Expr *e = ALLOC(Expr); e->tag=t; e->line=tok_line; e->col=tok_col; e->file=src_file; return e; }
 static Expr *e_num(double n) { Expr *e=mkexpr(E_NUM); e->num=n; return e; }
-static Expr *e_var(const char *s) { Expr *e=mkexpr(E_VAR); strcpy(e->name,s); return e; }
+static Expr *e_var(const char *s) { Expr *e=mkexpr(E_VAR); e->name=intern(s); return e; }
 static Expr *e_nil(void) { return mkexpr(E_NIL); }
 static Expr *e_sec(int op) { Expr *e=mkexpr(E_SEC); e->op=op; return e; }
 static Expr *e_pair(Expr *a, Expr *b) { Expr *e=mkexpr(E_PAIR); e->l=a; e->r=b; return e; }
@@ -578,17 +690,17 @@ static Expr *e_app(Expr *fn, Expr **a, int n) {
 }
 static Expr *e_where(int rec, Expr *body, const char *nm, Expr *def, Pat *wp) {
     Expr *e = mkexpr(rec ? E_WHEREREC : E_WHERE);
-    e->l = body; if (nm) strcpy(e->name, nm); e->r = def; e->wpat = wp; return e;
+    e->l = body; if (nm) e->name = intern(nm); e->r = def; e->wpat = wp; return e;
 }
 
 /* ===== Patterns (types) ===== */
 enum { P_NUM, P_VAR, P_NIL, P_CONS, P_PAIR, P_WILD };
 struct Pat {
-    int tag; double num; char var[128];
+    int tag; double num; const char *var;
     Pat *hd, *tl, *fst, *snd;
 };
 static Pat *p_num(double n) { Pat *p=ALLOC(Pat); p->tag=P_NUM; p->num=n; return p; }
-static Pat *p_var(const char *s) { Pat *p=ALLOC(Pat); p->tag=P_VAR; strcpy(p->var,s); return p; }
+static Pat *p_var(const char *s) { Pat *p=ALLOC(Pat); p->tag=P_VAR; p->var=intern(s); return p; }
 static Pat *p_nil(void) { Pat *p=ALLOC(Pat); p->tag=P_NIL; return p; }
 static Pat *p_wild(void) { Pat *p=ALLOC(Pat); p->tag=P_WILD; return p; }
 static Pat *p_cons(Pat *h, Pat *t) { Pat *p=ALLOC(Pat); p->tag=P_CONS; p->hd=h; p->tl=t; return p; }
@@ -605,25 +717,25 @@ static Pat *parse_pat(void);
 static int is_atom_start(void) {
     if (tok==T_NUM||tok==T_LPAREN||tok==T_LBRACKET||tok==T_STR) return 1;
     if (tok==T_ID)
-        return strcmp(tok_id,"then") && strcmp(tok_id,"else") &&
-               strcmp(tok_id,"where") && strcmp(tok_id,"whererec") &&
-               strcmp(tok_id,"dec") && strcmp(tok_id,"uses");
+        return tok_id_interned != S_then && tok_id_interned != S_else &&
+               tok_id_interned != S_where && tok_id_interned != S_whererec &&
+               tok_id_interned != S_dec && tok_id_interned != S_uses;
     return 0;
 }
 
 static Expr *parse_atom(void) {
     if (tok==T_NUM) { Expr *e=e_num(tok_num); scan(); return e; }
     if (tok==T_ID) {
-        if (!strcmp(tok_id,"if")) {
+        if (tok_id_interned == S_if) {
             scan(); Expr *c=parse_or();
-            if (tok!=T_ID||strcmp(tok_id,"then")) die("expected 'then'");
+            if (tok!=T_ID||tok_id_interned != S_then) die("expected 'then'");
             scan(); Expr *t=parse_or();
-            if (tok!=T_ID||strcmp(tok_id,"else")) die("expected 'else'");
+            if (tok!=T_ID||tok_id_interned != S_else) die("expected 'else'");
             scan(); return e_if(c,t,parse_or());
         }
-        if (!strcmp(tok_id,"nil"))  { scan(); return e_nil(); }
-        if (!strcmp(tok_id,"true")) { scan(); return e_num(1); }
-        if (!strcmp(tok_id,"false")){ scan(); return e_num(0); }
+        if (tok_id_interned == S_nil)  { scan(); return e_nil(); }
+        if (tok_id_interned == S_true) { scan(); return e_num(1); }
+        if (tok_id_interned == S_false){ scan(); return e_num(0); }
         Expr *e=e_var(tok_id); scan(); return e;
     }
     if (tok==T_LPAREN) {
@@ -654,7 +766,7 @@ static Expr *parse_atom(void) {
             comp->nargs=0;
             while (1) {
                 if (tok==T_ID) {
-                    char vn[128]; strcpy(vn,tok_id); scan();
+                    const char *vn = intern(tok_id); scan();
                     if (tok==T_LT) {
                         scan(); /* consume '<' */
                         if (tok==T_MINUS) {
@@ -769,13 +881,13 @@ static Expr *parse_or(void) {
 }
 static Expr *parse_expr(void) {
     Expr *e = parse_or();
-    while (tok==T_ID && (!strcmp(tok_id,"where")||!strcmp(tok_id,"whererec"))) {
-        int rec = !strcmp(tok_id,"whererec");
+    while (tok==T_ID && (tok_id_interned == S_where || tok_id_interned == S_whererec)) {
+        int rec = tok_id_interned == S_whererec;
         scan();
         if (rec) {
             /* whererec: simple name only (needed for circular thunk) */
             if (tok!=T_ID) die("expected name after whererec");
-            char nm[128]; strcpy(nm,tok_id); scan();
+            const char *nm = intern(tok_id); scan();
             expect(T_IS);
             Expr *def = parse_cons();
             e = e_where(1, e, nm, def, NULL);
@@ -796,8 +908,8 @@ static Expr *parse_expr(void) {
 /* ===== Pattern parsing ===== */
 static Pat *parse_pat_atom(void) {
     if (tok==T_NUM) { Pat *p=p_num(tok_num); scan(); return p; }
-    if (tok==T_ID && !strcmp(tok_id,"nil")) { scan(); return p_nil(); }
-    if (tok==T_ID && !strcmp(tok_id,"_"))   { scan(); return p_wild(); }
+    if (tok==T_ID && tok_id_interned == S_nil) { scan(); return p_nil(); }
+    if (tok==T_ID && tok_id_interned == S_underscore) { scan(); return p_wild(); }
     if (tok==T_ID) { Pat *p=p_var(tok_id); scan(); return p; }
     if (tok==T_LBRACKET) {
         scan();
@@ -826,7 +938,7 @@ static Pat *parse_pat(void) {
 
 /* ===== Function table ===== */
 typedef struct Branch { int nargs; Pat *pats[MAX_ARGS]; Expr *body; struct Branch *next; } Branch;
-typedef struct Func { char name[128]; Branch *branches; struct Func *next; Val *cached; } Func;
+typedef struct Func { const char *name; Branch *branches; struct Func *next; Val *cached; } Func;
 static Func *funcs;
 
 static void gc_mark_func_cache(void) {
@@ -835,12 +947,12 @@ static void gc_mark_func_cache(void) {
 }
 
 static Func *find_func(const char *name) {
-    for (Func *f=funcs;f;f=f->next) if (!strcmp(f->name,name)) return f;
+    for (Func *f=funcs;f;f=f->next) if (f->name == name) return f;
     return NULL;
 }
 static void add_branch(const char *fn, int na, Pat **pats, Expr *body) {
     Func *f=find_func(fn);
-    if (!f) { f=ALLOC(Func); strcpy(f->name,fn); f->next=funcs; funcs=f; }
+    if (!f) { f=ALLOC(Func); f->name=intern(fn); f->next=funcs; funcs=f; }
     Branch *b=ALLOC(Branch); b->nargs=na;
     for (int i=0;i<na;i++) b->pats[i]=pats[i];
     b->body=body;
@@ -858,10 +970,10 @@ static int match_pat(Pat *p, Val *v, Env **env) {
     if (p->tag == P_WILD) return 1;
     v = force(v);
     switch (p->tag) {
-    case P_NUM:  return v->tag==V_NUM && v->num==p->num;
+    case P_NUM:  return v->tag==V_NUM && v->u.num==p->num;
     case P_NIL:  return v->tag==V_NIL;
-    case P_CONS: return v->tag==V_CONS && match_pat(p->hd,v->hd,env) && match_pat(p->tl,v->tl,env);
-    case P_PAIR: return v->tag==V_PAIR && match_pat(p->fst,v->fst,env) && match_pat(p->snd,v->snd,env);
+    case P_CONS: return v->tag==V_CONS && match_pat(p->hd,v->u.cons.hd,env) && match_pat(p->tl,v->u.cons.tl,env);
+    case P_PAIR: return v->tag==V_PAIR && match_pat(p->fst,v->u.pair.fst,env) && match_pat(p->snd,v->u.pair.snd,env);
     }
     return 0;
 }
@@ -1044,10 +1156,10 @@ static const uint8_t font5x7[][7] = {
     {0x00,0x00,0x12,0x0D,0x00,0x00,0x00}, /* ~ */
 };
 
-static void gfx_draw_char(int x, int y, uint32_t c, int ch) {
-    if (ch<32 || ch>126) return;
+static void gfx_draw_char(int x, int y, uint32_t c, int glyph_ch) {
+    if (glyph_ch<32 || glyph_ch>126) return;
     int s = gfx_scale;
-    const uint8_t *glyph = font5x7[ch-32];
+    const uint8_t *glyph = font5x7[glyph_ch-32];
     for (int row=0; row<7; row++)
         for (int col=0; col<5; col++)
             if (glyph[row] & (1<<col))
@@ -1061,42 +1173,26 @@ static void gfx_text(int x, int y, uint32_t c, Val *str) {
     int cx = x;
     Val *p = force(str);
     while (p->tag == V_CONS) {
-        int ch = (int)force(p->hd)->num;
-        if (ch == '\n') { y += 9*s; cx = x; }
-        else { gfx_draw_char(cx, y, c, ch); cx += 6*s; }
-        p = force(p->tl);
+        int c_ch = (int)force(p->u.cons.hd)->u.num;
+        if (c_ch == '\n') { y += 9*s; cx = x; }
+        else { gfx_draw_char(cx, y, c, c_ch); cx += 6*s; }
+        p = force(p->u.cons.tl);
     }
 }
 
 static Val *env_lookup(const char *name, Env *env) {
-    /* math.h primitives — always take priority so C builtins are always available */
-    if (!strcmp(name,"sin")||!strcmp(name,"cos")||!strcmp(name,"tan")||
-        !strcmp(name,"asin")||!strcmp(name,"acos")||!strcmp(name,"atan")||
-        !strcmp(name,"atan2")||!strcmp(name,"exp")||!strcmp(name,"log")||
-        !strcmp(name,"log10")||!strcmp(name,"sqrt")||!strcmp(name,"pow")||
-        !strcmp(name,"floor")||!strcmp(name,"ceil")||!strcmp(name,"fabs"))
-        return vfun(name);
-    if (!strcmp(name,"pi")) return vnum(3.14159265358979323846);
-    for (Env *p=env;p;p=p->next) if (!strcmp(p->name,name)) return p->val;
-    /* built-in names */
-    if (!strcmp(name,"map")||!strcmp(name,"head")||!strcmp(name,"tail")||
-        !strcmp(name,"succ")||!strcmp(name,"front")||!strcmp(name,"length")||
-        !strcmp(name,"nth")||!strcmp(name,"xor")||
-        !strcmp(name,"gopen")||!strcmp(name,"gclose")||!strcmp(name,"gplot")||
-        !strcmp(name,"gclear")||!strcmp(name,"gloop")||!strcmp(name,"gsync")||
-        !strcmp(name,"gwidth")||!strcmp(name,"gheight")||!strcmp(name,"gmouse")||
-        !strcmp(name,"gkey")||!strcmp(name,"gline")||!strcmp(name,"gcircle")||
-        !strcmp(name,"gtext")||!strcmp(name,"gscale")||!strcmp(name,"gpen")||
-        !strcmp(name,"gtitle")||!strcmp(name,"gblit")||
-        !strcmp(name,"gdrawcol")||!strcmp(name,"gkeyevent")||
-        !strcmp(name,"gbeep")||!strcmp(name,"gclick")||
-        !strcmp(name,"gsave")||!strcmp(name,"grestore"))
-        return vfun(name);
-    if (!strcmp(name,"timeseed")) return vnum((double)(time(NULL)%1000000));
-    if (!strcmp(name,"rand")||!strcmp(name,"srand")) return vfun(name);
-    if (!strcmp(name,"array")||!strcmp(name,"aget")||!strcmp(name,"alen")||
-        !strcmp(name,"aset")||!strcmp(name,"amake")||!strcmp(name,"tabulate")||
-        !strcmp(name,"amap")||!strcmp(name,"fst")||!strcmp(name,"snd")) return vfun(name);
+    int bf = builtin_flags(name);
+    /* priority builtins (math) — checked before env, can't be shadowed */
+    if (bf & BF_PRIO) {
+        if (bf & BF_FUN) return vfun(name);
+        if (name == S_pi) return vnum(3.14159265358979323846);
+    }
+    /* user environment */
+    for (Env *p=env;p;p=p->next) if (p->name == name) return p->val;
+    /* non-priority builtins */
+    if (bf & BF_FUN) return vfun(name);
+    if (name == S_timeseed) return vnum((double)(time(NULL)%1000000));
+    /* user-defined functions */
     Func *f=find_func(name);
     if (f && f->branches) {
         if (f->branches->nargs==0) {
@@ -1112,12 +1208,12 @@ static Val *env_lookup(const char *name, Env *env) {
 static Val *apply_section(int op, Val *arg) {
     if (op==T_CONS) {
         arg=force(arg);
-        if (arg->tag==V_PAIR) return vcons(arg->fst,arg->snd);
+        if (arg->tag==V_PAIR) return vcons(arg->u.pair.fst,arg->u.pair.snd);
         die(":: section expects a pair");
     }
     arg=force(arg);
     if (arg->tag==V_PAIR) {
-        double a=force(arg->fst)->num, b=force(arg->snd)->num;
+        double a=force(arg->u.pair.fst)->u.num, b=force(arg->u.pair.snd)->u.num;
         switch (op) {
         case T_PLUS:  return vnum(a+b);
         case T_MINUS: return vnum(a-b);
@@ -1156,22 +1252,22 @@ static Val *builtin_map(Val *fn, Val *lst) {
             result = vcons(apply_val(fn, &ARR(l)[i], 1), result);
         return result;
     }
-    Val *hd = apply_val(fn, &l->hd, 1);
-    MapD *md=malloc(sizeof(MapD)); md->fn=fn; md->lst=l->tl;
+    Val *hd = apply_val(fn, &l->u.cons.hd, 1);
+    MapD *md=malloc(sizeof(MapD)); md->fn=fn; md->lst=l->u.cons.tl;
     return vcons(hd, mkthunk_c(map_thunk, md));
 }
 
 static Val *builtin_zip(Val *a, Val *b) {
     Val *fa=force(a), *fb=force(b);
     if (fa->tag==V_NIL||fb->tag==V_NIL) return val_nil;
-    ZipD *zd=malloc(sizeof(ZipD)); zd->a=fa->tl; zd->b=fb->tl;
-    return vcons(vpair(fa->hd,fb->hd), mkthunk_c(zip_thunk,zd));
+    ZipD *zd=malloc(sizeof(ZipD)); zd->a=fa->u.cons.tl; zd->b=fb->u.cons.tl;
+    return vcons(vpair(fa->u.cons.hd,fb->u.cons.hd), mkthunk_c(zip_thunk,zd));
 }
 
 static Val *builtin_append(Val *a, Val *b) {
     Val *fa=force(a);
     if (fa->tag==V_NIL) return b;
-    return vcons(fa->hd, builtin_append(fa->tl, b));
+    return vcons(fa->u.cons.hd, builtin_append(fa->u.cons.tl, b));
 }
 
 typedef struct { long cur, hi; } RangeD;
@@ -1183,7 +1279,7 @@ static Val *range_thunk(void *d) {
     return vcons(vnum(c), mkthunk_c(range_thunk, nr));
 }
 static Val *builtin_range(Val *a, Val *b) {
-    long lo=(long)a->num, hi=(long)b->num;
+    long lo=(long)a->u.num, hi=(long)b->u.num;
     if (lo>hi) return val_nil;
     RangeD *r=malloc(sizeof(RangeD)); r->cur=lo; r->hi=hi;
     return range_thunk(r);
@@ -1193,13 +1289,13 @@ static Val *builtin_front(double n, Val *lst) {
     if (n<=0) return val_nil;
     Val *l=force(lst);
     if (l->tag==V_NIL) return val_nil;
-    return vcons(l->hd, builtin_front(n-1, l->tl));
+    return vcons(l->u.cons.hd, builtin_front(n-1, l->u.cons.tl));
 }
 
 static Val *builtin_length(Val *lst) {
     long n = 0;
     Val *l = force(lst);
-    while (l->tag == V_CONS) { n++; l = force(l->tl); }
+    while (l->tag == V_CONS) { n++; l = force(l->u.cons.tl); }
     return vnum(n);
 }
 
@@ -1207,60 +1303,60 @@ static Val *call_func(const char *name, Val **args, int nargs);
 
 static Val *apply_val(Val *fn, Val **args, int nargs) {
     fn=force(fn);
-    if (fn->tag==V_FUN) return call_func(fn->name,args,nargs);
-    if (fn->tag==V_SEC && nargs==1) return apply_section(fn->op,args[0]);
+    if (fn->tag==V_FUN) return call_func(fn->u.name,args,nargs);
+    if (fn->tag==V_SEC && nargs==1) return apply_section(fn->u.sec_op,args[0]);
     die("cannot apply value"); return NULL;
 }
 
 /* try_call_builtin: returns result if name is a built-in, NULL otherwise */
 static Val *try_call_builtin(const char *name, Val **args, int nargs) {
-    if (!strcmp(name,"map") && nargs==2) return builtin_map(args[0],args[1]);
-    if (!strcmp(name,"head") && nargs==1) { Val *l=force(args[0]); if(l->tag==V_CONS) return l->hd; die("head of []"); }
-    if (!strcmp(name,"tail") && nargs==1) { Val *l=force(args[0]); if(l->tag==V_CONS) return l->tl; die("tail of []"); }
-    if (!strcmp(name,"succ") && nargs==1) return vnum(force(args[0])->num+1);
-    if (!strcmp(name,"xor") && nargs==2) return vnum((double)((long)force(args[0])->num ^ (long)force(args[1])->num));
-    if (!strcmp(name,"front") && nargs==1 && force(args[0])->tag==V_PAIR) {
-        Val *p=force(args[0]); return builtin_front(force(p->fst)->num, p->snd);
+    if (name==S_map && nargs==2) return builtin_map(args[0],args[1]);
+    if (name==S_head && nargs==1) { Val *l=force(args[0]); if(l->tag==V_CONS) return l->u.cons.hd; die("head of []"); }
+    if (name==S_tail && nargs==1) { Val *l=force(args[0]); if(l->tag==V_CONS) return l->u.cons.tl; die("tail of []"); }
+    if (name==S_succ && nargs==1) return vnum(force(args[0])->u.num+1);
+    if (name==S_xor && nargs==2) return vnum((double)((long)force(args[0])->u.num ^ (long)force(args[1])->u.num));
+    if (name==S_front && nargs==1 && force(args[0])->tag==V_PAIR) {
+        Val *p=force(args[0]); return builtin_front(force(p->u.pair.fst)->u.num, p->u.pair.snd);
     }
-    if (!strcmp(name,"length") && nargs==1) return builtin_length(args[0]);
-    if (!strcmp(name,"nth") && nargs==2) {
-        int n=(int)force(args[0])->num;
+    if (name==S_length && nargs==1) return builtin_length(args[0]);
+    if (name==S_nth && nargs==2) {
+        int n=(int)force(args[0])->u.num;
         Val *p=force(args[1]);
-        while (n>0 && p->tag==V_CONS) { p=force(p->tl); n--; }
-        if (p->tag==V_CONS) return p->hd;
+        while (n>0 && p->tag==V_CONS) { p=force(p->u.cons.tl); n--; }
+        if (p->tag==V_CONS) return p->u.cons.hd;
         die("nth: index out of range");
     }
 
     /* pair built-ins */
-    if (!strcmp(name,"fst") && nargs==1) { Val *p=force(args[0]); if(p->tag!=V_PAIR) die("fst: not a pair"); return p->fst; }
-    if (!strcmp(name,"snd") && nargs==1) { Val *p=force(args[0]); if(p->tag!=V_PAIR) die("snd: not a pair"); return p->snd; }
+    if (name==S_fst && nargs==1) { Val *p=force(args[0]); if(p->tag!=V_PAIR) die("fst: not a pair"); return p->u.pair.fst; }
+    if (name==S_snd && nargs==1) { Val *p=force(args[0]); if(p->tag!=V_PAIR) die("snd: not a pair"); return p->u.pair.snd; }
 
     /* array built-ins */
-    if (!strcmp(name,"array") && nargs==1) {
+    if (name==S_array && nargs==1) {
         /* list → array */
         int len = 0;
-        for (Val *p = force(args[0]); p->tag == V_CONS; p = force(p->tl)) len++;
+        for (Val *p = force(args[0]); p->tag == V_CONS; p = force(p->u.cons.tl)) len++;
         Val **data = (Val**)malloc(len * sizeof(Val*));
         Val *p = force(args[0]);
-        for (int i = 0; i < len; i++) { data[i] = p->hd; p = force(p->tl); }
-        Val *v = val_alloc(); v->tag = V_ARR; v->hd = (Val*)data; v->op = len;
+        for (int i = 0; i < len; i++) { data[i] = p->u.cons.hd; p = force(p->u.cons.tl); }
+        Val *v = val_alloc(); v->tag = V_ARR; v->u.arr.data = data; v->u.arr.len = len;
         return v;
     }
-    if (!strcmp(name,"aget") && nargs==2) {
-        int i = (int)force(args[0])->num;
+    if (name==S_aget && nargs==2) {
+        int i = (int)force(args[0])->u.num;
         Val *a = force(args[1]);
         if (a->tag != V_ARR) die("aget: not an array");
         if (i < 0 || i >= ARRLEN(a)) die("aget: index out of range");
         return ARR(a)[i];
     }
-    if (!strcmp(name,"alen") && nargs==1) {
+    if (name==S_alen && nargs==1) {
         Val *a = force(args[0]);
         if (a->tag != V_ARR) die("alen: not an array");
         return vnum(ARRLEN(a));
     }
-    if (!strcmp(name,"aset") && nargs==3) {
+    if (name==S_aset && nargs==3) {
         /* aset i val arr → new array with arr[i]=val */
-        int i = (int)force(args[0])->num;
+        int i = (int)force(args[0])->u.num;
         Val *v = args[1];
         Val *a = force(args[2]);
         if (a->tag != V_ARR) die("aset: not an array");
@@ -1269,30 +1365,30 @@ static Val *try_call_builtin(const char *name, Val **args, int nargs) {
         Val **data = (Val**)malloc(len * sizeof(Val*));
         for (int j = 0; j < len; j++) data[j] = ARR(a)[j];
         data[i] = v;
-        Val *r = val_alloc(); r->tag = V_ARR; r->hd = (Val*)data; r->op = len;
+        Val *r = val_alloc(); r->tag = V_ARR; r->u.arr.data = data; r->u.arr.len = len;
         return r;
     }
-    if (!strcmp(name,"amake") && nargs==2) {
+    if (name==S_amake && nargs==2) {
         /* amake n val → array of n copies of val */
-        int n = (int)force(args[0])->num;
+        int n = (int)force(args[0])->u.num;
         Val *v = args[1];
         if (n < 0) die("amake: negative size");
         Val **data = (Val**)malloc(n * sizeof(Val*));
         for (int i = 0; i < n; i++) data[i] = v;
-        Val *r = val_alloc(); r->tag = V_ARR; r->hd = (Val*)data; r->op = n;
+        Val *r = val_alloc(); r->tag = V_ARR; r->u.arr.data = data; r->u.arr.len = n;
         return r;
     }
 
-    if (!strcmp(name,"tabulate") && nargs==2) {
+    if (name==S_tabulate && nargs==2) {
         /* tabulate n f → array of n elements where arr[i] = f(i) */
-        int n = (int)force(args[0])->num;
+        int n = (int)force(args[0])->u.num;
         Val *fn = args[1];
         if (n < 0) die("tabulate: negative size");
         Val **data = (Val**)malloc(n * sizeof(Val*));
         Val *zero = vnum(0);
         for (int i = 0; i < n; i++) data[i] = zero;
         /* build array first so GC can reach elements via V_ARR */
-        volatile Val *r = val_alloc(); r->tag = V_ARR; r->hd = (Val*)data; r->op = n;
+        volatile Val *r = val_alloc(); r->tag = V_ARR; r->u.arr.data = data; r->u.arr.len = n;
         for (int i = 0; i < n; i++) {
             Val *idx = vnum(i);
             ARR(r)[i] = apply_val(fn, &idx, 1);
@@ -1300,7 +1396,7 @@ static Val *try_call_builtin(const char *name, Val **args, int nargs) {
         return (Val*)r;
     }
 
-    if (!strcmp(name,"amap") && nargs==2) {
+    if (name==S_amap && nargs==2) {
         /* amap f arr → new array where arr[i] = f(old[i]) */
         Val *fn = args[0];
         Val *a = force(args[1]);
@@ -1309,16 +1405,16 @@ static Val *try_call_builtin(const char *name, Val **args, int nargs) {
         Val **data = (Val**)malloc(n * sizeof(Val*));
         Val *zero = vnum(0);
         for (int i = 0; i < n; i++) data[i] = zero;
-        volatile Val *r = val_alloc(); r->tag = V_ARR; r->hd = (Val*)data; r->op = n;
+        volatile Val *r = val_alloc(); r->tag = V_ARR; r->u.arr.data = data; r->u.arr.len = n;
         for (int i = 0; i < n; i++)
             ARR(r)[i] = apply_val(fn, &ARR(a)[i], 1);
         return (Val*)r;
     }
 
     /* graphics built-ins */
-    if (!strcmp(name,"gopen") && nargs==1) {
+    if (name==S_gopen && nargs==1) {
         Val *p=force(args[0]); if(p->tag!=V_PAIR) die("gopen expects (w,h)");
-        int w=(int)force(p->fst)->num, h=(int)force(p->snd)->num;
+        int w=(int)force(p->u.pair.fst)->u.num, h=(int)force(p->u.pair.snd)->u.num;
         if (w<1||w>GFX_MAX_W||h<1||h>GFX_MAX_H) die("gopen: size out of range");
         memset(gfx_buf,0,sizeof(gfx_buf));
         memset(&gfx_f,0,sizeof(gfx_f));
@@ -1328,55 +1424,55 @@ static Val *try_call_builtin(const char *name, Val **args, int nargs) {
         if (!audio_open) { fenster_audio_open(&gfx_audio); audio_open=1; }
         return vnum(0);
     }
-    if (!strcmp(name,"gclose") && nargs==1) {
+    if (name==S_gclose && nargs==1) {
         if (audio_open) { fenster_audio_close(&gfx_audio); audio_open=0; }
         if (gfx_open) { fenster_close(&gfx_f); gfx_open=0; }
         return vnum(0);
     }
-    if (!strcmp(name,"gplot") && nargs==1) {
+    if (name==S_gplot && nargs==1) {
         Val *p=force(args[0]); if(p->tag!=V_PAIR) die("gplot expects (x,(y,c))");
-        int x=(int)force(p->fst)->num;
-        Val *p2=force(p->snd); if(p2->tag!=V_PAIR) die("gplot expects (x,(y,c))");
-        int y=(int)force(p2->fst)->num;
-        uint32_t c=(uint32_t)(long)force(p2->snd)->num;
+        int x=(int)force(p->u.pair.fst)->u.num;
+        Val *p2=force(p->u.pair.snd); if(p2->tag!=V_PAIR) die("gplot expects (x,(y,c))");
+        int y=(int)force(p2->u.pair.fst)->u.num;
+        uint32_t c=(uint32_t)(long)force(p2->u.pair.snd)->u.num;
         gfx_plot(x,y,c);
         return vnum(0);
     }
-    if (!strcmp(name,"gclear") && nargs==1) {
-        uint32_t c=(uint32_t)(long)force(args[0])->num;
+    if (name==S_gclear && nargs==1) {
+        uint32_t c=(uint32_t)(long)force(args[0])->u.num;
         for (int i=0;i<gfx_f.width*gfx_f.height;i++) gfx_buf[i]=c;
         return vnum(0);
     }
-    if (!strcmp(name,"gsave") && nargs==1) {
+    if (name==S_gsave && nargs==1) {
         memcpy(gfx_snap,gfx_buf,sizeof(uint32_t)*gfx_f.width*gfx_f.height);
         return vnum(0);
     }
-    if (!strcmp(name,"grestore") && nargs==1) {
+    if (name==S_grestore && nargs==1) {
         memcpy(gfx_buf,gfx_snap,sizeof(uint32_t)*gfx_f.width*gfx_f.height);
         return vnum(0);
     }
-    if (!strcmp(name,"gblit") && nargs==1) {
+    if (name==S_gblit && nargs==1) {
         Val *a=force(args[0]);
         if (a->tag!=V_ARR) die("gblit: not an array");
         int n=ARRLEN(a), sz=gfx_f.width*gfx_f.height;
         if (n>sz) n=sz;
-        for (int i=0;i<n;i++) gfx_buf[i]=(uint32_t)(long)force(ARR(a)[i])->num;
+        for (int i=0;i<n;i++) gfx_buf[i]=(uint32_t)(long)force(ARR(a)[i])->u.num;
         return vnum(0);
     }
-    if (!strcmp(name,"gdrawcol") && nargs==1) {
+    if (name==S_gdrawcol && nargs==1) {
         /* gdrawcol (w, (h, (s, colorList))) → draw cells each with its own colour
            colorList: list of 0xRRGGBB values, one per cell (0 = empty/black) */
-        Val *p=force(args[0]); int gw=(int)force(p->fst)->num;
-        p=force(p->snd); int gh=(int)force(p->fst)->num;
-        p=force(p->snd); int gs=(int)force(p->fst)->num;
-        Val *board=force(p->snd);
+        Val *p=force(args[0]); int gw=(int)force(p->u.pair.fst)->u.num;
+        p=force(p->u.pair.snd); int gh=(int)force(p->u.pair.fst)->u.num;
+        p=force(p->u.pair.snd); int gs=(int)force(p->u.pair.fst)->u.num;
+        Val *board=force(p->u.pair.snd);
         int pw=gfx_f.width, ph=gfx_f.height;
         for (int i=0;i<pw*ph;i++) gfx_buf[i]=0;
         int pad=gs>6?1:0;
         if (board->tag==V_ARR) {
             int n=gw*gh; if (n>ARRLEN(board)) n=ARRLEN(board);
             for (int i=0;i<n;i++) {
-                uint32_t c=(uint32_t)(long)force(ARR(board)[i])->num;
+                uint32_t c=(uint32_t)(long)force(ARR(board)[i])->u.num;
                 if (c) {
                     int cx=(i%gw)*gs, cy=(i/gw)*gs;
                     for (int dy=pad;dy<gs-pad;dy++)
@@ -1386,8 +1482,8 @@ static Val *try_call_builtin(const char *name, Val **args, int nargs) {
             }
         } else {
             Val *cur=board;
-            for (int i=0;i<gw*gh && cur->tag==V_CONS;i++,cur=force(cur->tl)) {
-                uint32_t c=(uint32_t)(long)force(cur->hd)->num;
+            for (int i=0;i<gw*gh && cur->tag==V_CONS;i++,cur=force(cur->u.cons.tl)) {
+                uint32_t c=(uint32_t)(long)force(cur->u.cons.hd)->u.num;
                 if (c) {
                     int cx=(i%gw)*gs, cy=(i/gw)*gs;
                     for (int dy=pad;dy<gs-pad;dy++)
@@ -1398,12 +1494,12 @@ static Val *try_call_builtin(const char *name, Val **args, int nargs) {
         }
         return vnum(0);
     }
-    if (!strcmp(name,"gloop") && nargs==1) {
+    if (name==S_gloop && nargs==1) {
         if (!gfx_open) return vnum(1);
         memcpy(gfx_prev_keys, gfx_f.keys, sizeof(gfx_f.keys));
         return vnum(fenster_loop(&gfx_f));
     }
-    if (!strcmp(name,"gkeyevent") && nargs==1) {
+    if (name==S_gkeyevent && nargs==1) {
         for (int i=1; i<256; i++) {
             if (gfx_f.keys[i] && !gfx_prev_keys[i]) {
                 int k = i;
@@ -1414,61 +1510,61 @@ static Val *try_call_builtin(const char *name, Val **args, int nargs) {
         }
         return vnum(0);
     }
-    if (!strcmp(name,"gsync") && nargs==1) {
+    if (name==S_gsync && nargs==1) {
         audio_feed();
         int64_t now=fenster_time();
         if (now-gfx_last_time < 1000/60) fenster_sleep(1000/60-(now-gfx_last_time));
         gfx_last_time=fenster_time();
         return vnum(0);
     }
-    if (!strcmp(name,"gwidth") && nargs==1) { return vnum(gfx_open?gfx_f.width:0); }
-    if (!strcmp(name,"gheight") && nargs==1) { return vnum(gfx_open?gfx_f.height:0); }
-    if (!strcmp(name,"gmouse") && nargs==1) {
+    if (name==S_gwidth && nargs==1) { return vnum(gfx_open?gfx_f.width:0); }
+    if (name==S_gheight && nargs==1) { return vnum(gfx_open?gfx_f.height:0); }
+    if (name==S_gmouse && nargs==1) {
         return vpair(vnum(gfx_f.x),vnum(gfx_f.y));
     }
-    if (!strcmp(name,"gclick") && nargs==1) {
+    if (name==S_gclick && nargs==1) {
         return vnum(gfx_f.mouse);
     }
-    if (!strcmp(name,"gkey") && nargs==1) {
-        int k=(int)force(args[0])->num;
+    if (name==S_gkey && nargs==1) {
+        int k=(int)force(args[0])->u.num;
         return vnum((k>=0&&k<256)?gfx_f.keys[k]:0);
     }
-    if (!strcmp(name,"gline") && nargs==5) {
-        int x0=(int)force(args[0])->num, y0=(int)force(args[1])->num;
-        int x1=(int)force(args[2])->num, y1=(int)force(args[3])->num;
-        uint32_t c=(uint32_t)(long)force(args[4])->num;
+    if (name==S_gline && nargs==5) {
+        int x0=(int)force(args[0])->u.num, y0=(int)force(args[1])->u.num;
+        int x1=(int)force(args[2])->u.num, y1=(int)force(args[3])->u.num;
+        uint32_t c=(uint32_t)(long)force(args[4])->u.num;
         gfx_line(x0,y0,x1,y1,c);
         return vnum(0);
     }
-    if (!strcmp(name,"gcircle") && nargs==4) {
-        int cx=(int)force(args[0])->num, cy=(int)force(args[1])->num;
-        int r=(int)force(args[2])->num;
-        uint32_t c=(uint32_t)(long)force(args[3])->num;
+    if (name==S_gcircle && nargs==4) {
+        int cx=(int)force(args[0])->u.num, cy=(int)force(args[1])->u.num;
+        int r=(int)force(args[2])->u.num;
+        uint32_t c=(uint32_t)(long)force(args[3])->u.num;
         gfx_circle(cx,cy,r,c);
         return vnum(0);
     }
-    if (!strcmp(name,"gtext") && nargs==4) {
-        int x=(int)force(args[0])->num, y=(int)force(args[1])->num;
-        uint32_t c=(uint32_t)(long)force(args[2])->num;
+    if (name==S_gtext && nargs==4) {
+        int x=(int)force(args[0])->u.num, y=(int)force(args[1])->u.num;
+        uint32_t c=(uint32_t)(long)force(args[2])->u.num;
         gfx_text(x,y,c,args[3]);
         return vnum(0);
     }
-    if (!strcmp(name,"gscale") && nargs==1) {
-        int s=(int)force(args[0])->num;
+    if (name==S_gscale && nargs==1) {
+        int s=(int)force(args[0])->u.num;
         if (s>=1 && s<=8) gfx_scale=s;
         return vnum(0);
     }
-    if (!strcmp(name,"gpen") && nargs==1) {
-        int w=(int)force(args[0])->num;
+    if (name==S_gpen && nargs==1) {
+        int w=(int)force(args[0])->u.num;
         if (w>=1 && w<=32) gfx_pen=w;
         return vnum(0);
     }
-    if (!strcmp(name,"gtitle") && nargs==1) {
+    if (name==S_gtitle && nargs==1) {
         /* extract Hope string to C string */
         static char tbuf[256];
         int ti=0;
         Val *p=force(args[0]);
-        while (p->tag==V_CONS && ti<254) { tbuf[ti++]=(char)(int)force(p->hd)->num; p=force(p->tl); }
+        while (p->tag==V_CONS && ti<254) { tbuf[ti++]=(char)(int)force(p->u.cons.hd)->u.num; p=force(p->u.cons.tl); }
         tbuf[ti]='\0';
         gfx_f.title = tbuf;
         if (gfx_open) {
@@ -1483,9 +1579,9 @@ static Val *try_call_builtin(const char *name, Val **args, int nargs) {
         }
         return vnum(0);
     }
-    if (!strcmp(name,"gbeep") && nargs==2) {
-        double freq = force(args[0])->num;
-        int dur_ms = (int)force(args[1])->num;
+    if (name==S_gbeep && nargs==2) {
+        double freq = force(args[0])->u.num;
+        int dur_ms = (int)force(args[1])->u.num;
         if (!audio_open) { fenster_audio_open(&gfx_audio); audio_open = 1; }
         beep_freq = freq;
         beep_phase = 0;
@@ -1494,25 +1590,25 @@ static Val *try_call_builtin(const char *name, Val **args, int nargs) {
         return vnum(0);
     }
     /* rand / srand */
-    if (!strcmp(name,"rand")  && nargs==1) { (void)force(args[0]); return vnum((double)arc4random()); }
-    if (!strcmp(name,"srand") && nargs==1) { srand((unsigned)force(args[0])->num); return vnum(0); }
+    if (name==S_rand  && nargs==1) { (void)force(args[0]); return vnum((double)arc4random()); }
+    if (name==S_srand && nargs==1) { srand((unsigned)force(args[0])->u.num); return vnum(0); }
     /* math.h built-ins — single argument (radians) */
-    if (!strcmp(name,"sin")  && nargs==1) return vnum(sin  (force(args[0])->num));
-    if (!strcmp(name,"cos")  && nargs==1) return vnum(cos  (force(args[0])->num));
-    if (!strcmp(name,"tan")  && nargs==1) return vnum(tan  (force(args[0])->num));
-    if (!strcmp(name,"asin") && nargs==1) return vnum(asin (force(args[0])->num));
-    if (!strcmp(name,"acos") && nargs==1) return vnum(acos (force(args[0])->num));
-    if (!strcmp(name,"atan") && nargs==1) return vnum(atan (force(args[0])->num));
-    if (!strcmp(name,"exp")  && nargs==1) return vnum(exp  (force(args[0])->num));
-    if (!strcmp(name,"log")  && nargs==1) return vnum(log  (force(args[0])->num));
-    if (!strcmp(name,"log10")&& nargs==1) return vnum(log10(force(args[0])->num));
-    if (!strcmp(name,"sqrt") && nargs==1) return vnum(sqrt (force(args[0])->num));
-    if (!strcmp(name,"floor")&& nargs==1) return vnum(floor(force(args[0])->num));
-    if (!strcmp(name,"ceil") && nargs==1) return vnum(ceil (force(args[0])->num));
-    if (!strcmp(name,"fabs") && nargs==1) return vnum(fabs (force(args[0])->num));
+    if (name==S_sin  && nargs==1) return vnum(sin  (force(args[0])->u.num));
+    if (name==S_cos  && nargs==1) return vnum(cos  (force(args[0])->u.num));
+    if (name==S_tan  && nargs==1) return vnum(tan  (force(args[0])->u.num));
+    if (name==S_asin && nargs==1) return vnum(asin (force(args[0])->u.num));
+    if (name==S_acos && nargs==1) return vnum(acos (force(args[0])->u.num));
+    if (name==S_atan && nargs==1) return vnum(atan (force(args[0])->u.num));
+    if (name==S_exp  && nargs==1) return vnum(exp  (force(args[0])->u.num));
+    if (name==S_log  && nargs==1) return vnum(log  (force(args[0])->u.num));
+    if (name==S_log10&& nargs==1) return vnum(log10(force(args[0])->u.num));
+    if (name==S_sqrt && nargs==1) return vnum(sqrt (force(args[0])->u.num));
+    if (name==S_floor&& nargs==1) return vnum(floor(force(args[0])->u.num));
+    if (name==S_ceil && nargs==1) return vnum(ceil (force(args[0])->u.num));
+    if (name==S_fabs && nargs==1) return vnum(fabs (force(args[0])->u.num));
     /* math.h built-ins — two arguments */
-    if (!strcmp(name,"atan2") && nargs==2) return vnum(atan2(force(args[0])->num, force(args[1])->num));
-    if (!strcmp(name,"pow")   && nargs==2) return vnum(pow  (force(args[0])->num, force(args[1])->num));
+    if (name==S_atan2 && nargs==2) return vnum(atan2(force(args[0])->u.num, force(args[1])->u.num));
+    if (name==S_pow   && nargs==2) return vnum(pow  (force(args[0])->u.num, force(args[1])->u.num));
     return NULL; /* not a built-in */
 }
 
@@ -1535,20 +1631,20 @@ static Val *call_func(const char *name, Val **args, int nargs) {
 static Val *list_concat(Val *a, Val *b) {
     a=force(a);
     if (a->tag==V_NIL) return b;
-    return vcons(a->hd, list_concat(force(a->tl), b));
+    return vcons(a->u.cons.hd, list_concat(force(a->u.cons.tl), b));
 }
 static Val *eval_comp(Expr *out, Expr *guard, Expr **gens, int ngens, Env *env);
 static Val *comp_iter(Expr *out, Expr *guard, Expr **gens, int ngens, Env *env, Val *range) {
     range=force(range);
     if (range->tag==V_NIL) return val_nil;
-    Env *ne=env_alloc(); ne->name=gens[0]->name; ne->val=range->hd; ne->next=env;
+    Env *ne=env_alloc(); ne->name=gens[0]->name; ne->val=range->u.cons.hd; ne->next=env;
     Val *head=eval_comp(out, guard, gens+2, ngens-2, ne);
-    Val *tail=comp_iter(out, guard, gens, ngens, env, range->tl);
+    Val *tail=comp_iter(out, guard, gens, ngens, env, range->u.cons.tl);
     return list_concat(head, tail);
 }
 static Val *eval_comp(Expr *out, Expr *guard, Expr **gens, int ngens, Env *env) {
     if (ngens==0) {
-        if (force(eval(guard,env))->num!=0) return vcons(eval(out,env), val_nil);
+        if (force(eval(guard,env))->u.num!=0) return vcons(eval(out,env), val_nil);
         return val_nil;
     }
     return comp_iter(out, guard, gens, ngens, env, force(eval(gens[1],env)));
@@ -1569,14 +1665,14 @@ static Val *eval(Expr *e, Env *env) {
         for (int i=0;i<e->nargs;i++) args[i]=eval(e->args[i],env);
         fn=force(fn);
         if (fn->tag==V_SEC && e->nargs==1)
-            return apply_section(fn->op,args[0]);
+            return apply_section(fn->u.sec_op,args[0]);
         if (fn->tag!=V_FUN) { die("cannot apply value"); return NULL; }
         /* try built-in first */
-        Val *br = try_call_builtin(fn->name, args, e->nargs);
+        Val *br = try_call_builtin(fn->u.name, args, e->nargs);
         if (br) return br;
         /* user-defined: TCO — find matching branch, rebind e/env, continue */
-        Func *f=find_func(fn->name);
-        if (!f) dief("undefined function: %s",fn->name);
+        Func *f=find_func(fn->u.name);
+        if (!f) dief("undefined function: %s",fn->u.name);
         int matched=0;
         for (Branch *b=f->branches;b;b=b->next) {
             if (b->nargs!=e->nargs) continue;
@@ -1585,7 +1681,7 @@ static Val *eval(Expr *e, Env *env) {
                 if (!match_pat(b->pats[i],args[i],&ne)) { ok=0; break; }
             if (ok) { e=b->body; env=ne; matched=1; break; }
         }
-        if (!matched) dief("no matching clause for %s/%d",fn->name,e->nargs);
+        if (!matched) dief("no matching clause for %s/%d",fn->u.name,e->nargs);
         continue; /* TCO: loop instead of recursive eval */
     }
     case E_BIN: {
@@ -1593,10 +1689,10 @@ static Val *eval(Expr *e, Env *env) {
         if (e->op==T_DOTDOT) return builtin_range(eval(e->l,env),eval(e->r,env));
         if (e->op==T_BAR2)   return builtin_zip(eval(e->l,env),eval(e->r,env));
         if (e->op==T_APPEND) return builtin_append(eval(e->l,env),eval(e->r,env));
-        if (e->op==T_AND) { Val *l=force(eval(e->l,env)); return l->num==0 ? vnum(0) : vnum(force(eval(e->r,env))->num!=0); }
-        if (e->op==T_OR)  { Val *l=force(eval(e->l,env)); return l->num!=0 ? vnum(1) : vnum(force(eval(e->r,env))->num!=0); }
+        if (e->op==T_AND) { Val *l=force(eval(e->l,env)); return l->u.num==0 ? vnum(0) : vnum(force(eval(e->r,env))->u.num!=0); }
+        if (e->op==T_OR)  { Val *l=force(eval(e->l,env)); return l->u.num!=0 ? vnum(1) : vnum(force(eval(e->r,env))->u.num!=0); }
         Val *lv=force(eval(e->l,env)), *rv=force(eval(e->r,env));
-        double l=lv->num, r=rv->num;
+        double l=lv->u.num, r=rv->u.num;
         switch (e->op) {
         case T_PLUS:  return vnum(l+r);
         case T_MINUS: return vnum(l-r);
@@ -1612,10 +1708,10 @@ static Val *eval(Expr *e, Env *env) {
         }
         die("unknown op");
     }
-    case E_NEG: return vnum(-force(eval(e->l,env))->num);
-    case E_NOT: return vnum(force(eval(e->l,env))->num!=0 ? 0 : 1);
+    case E_NEG: return vnum(-force(eval(e->l,env))->u.num);
+    case E_NOT: return vnum(force(eval(e->l,env))->u.num!=0 ? 0 : 1);
     case E_IF:  /* TCO: jump to chosen branch */
-        e = force(eval(e->cond,env))->num != 0 ? e->then_e : e->else_e;
+        e = force(eval(e->cond,env))->u.num != 0 ? e->then_e : e->else_e;
         continue;
     case E_WHERE: {
         if (e->wpat) {
@@ -1623,7 +1719,7 @@ static Val *eval(Expr *e, Env *env) {
             if (!match_pat(e->wpat, dv, &env)) die("where pattern match failed");
             e = e->l; continue;
         }
-        if (e->name[0]=='_' && e->name[1]=='\0') {
+        if (e->name == S_underscore) {
             eval(e->r, env);   /* where _ = expr: eager (side effects) */
             e = e->l; continue;
         }
@@ -1646,7 +1742,7 @@ static Val *eval(Expr *e, Env *env) {
         Val *thunk = mkthunk_e(e->r, NULL);
         Env *ne=env_alloc();
         ne->name=e->name; ne->val=thunk; ne->next=env;
-        thunk->thunk_env = ne;
+        thunk->u.thunk.env = ne;
         e = e->l; env = ne; continue;
     }
     case E_COMP:
@@ -1725,7 +1821,7 @@ static void run_file(int lib_mode) {
         }
 
         /* uses directive: read module paths as raw characters */
-        if (tok==T_ID && !strcmp(tok_id,"uses")) {
+        if (tok==T_ID && tok_id_interned == S_uses) {
             /* after 'uses', read paths raw (supports ./ ../ and .hop suffix) */
             int found_semi=0, end_line, end_col;
             while (ch!=';' && ch!='\n' && ch!=EOF) {
@@ -1750,13 +1846,13 @@ static void run_file(int lib_mode) {
         }
 
         /* skip declarations */
-        if (tok==T_ID && (!strcmp(tok_id,"dec")||
-            !strcmp(tok_id,"typevar")||!strcmp(tok_id,"infix")||
-            !strcmp(tok_id,"infixr")||!strcmp(tok_id,"data")||
-            !strcmp(tok_id,"abstype")||!strcmp(tok_id,"type")||
-            !strcmp(tok_id,"private"))) { skip_to_semi(); continue; }
+        if (tok==T_ID && (tok_id_interned==S_dec||
+            tok_id_interned==S_typevar||tok_id_interned==S_infix||
+            tok_id_interned==S_infixr||tok_id_interned==S_data||
+            tok_id_interned==S_abstype||tok_id_interned==S_type||
+            tok_id_interned==S_private)) { skip_to_semi(); continue; }
 
-        if (tok==T_ID && !strcmp(tok_id,"write")) {
+        if (tok==T_ID && tok_id_interned == S_write) {
             int write_line=tok_line, write_col=tok_col;
             scan();
             if (tok!=T_STR) die("write expects a format string");
@@ -1781,15 +1877,15 @@ static void run_file(int lib_mode) {
                         switch (*p) {
                         case 'd':
                             if (v->tag!=V_NUM) die("write: %d expects a number");
-                            printf("%ld",(long)v->num); break;
+                            printf("%ld",(long)v->u.num); break;
                         case 'f':
                             if (v->tag!=V_NUM) die("write: %f expects a number");
-                            printf("%g",v->num); break;
+                            printf("%g",v->u.num); break;
                         case 's':
                             write_chars(v); break;
                         case 'c':
                             if (v->tag!=V_NUM) die("write: %c expects a number");
-                            putchar((int)v->num); break;
+                            putchar((int)v->u.num); break;
                         case 'v':
                             print_val(v); break;
                         default:
@@ -1806,7 +1902,7 @@ static void run_file(int lib_mode) {
             int kw_line=tok_line, kw_col=tok_col;
             scan();
             if (tok!=T_ID) { skip_to_semi(); continue; }
-            char fn[128]; strcpy(fn,tok_id); scan();
+            const char *fn = intern(tok_id); scan();
             if (is_fun && find_func(fn))
                 { fprintf(stderr,"%s(%d:%d) warning: 'fun' redefines '%s' (use '---' for additional branches)\n",src_file,kw_line,kw_col,fn); }
             if (!is_fun && !find_func(fn))
@@ -1819,12 +1915,12 @@ static void run_file(int lib_mode) {
         }
 
         if (tok==T_ID) {
-            char nm[128]; strcpy(nm,tok_id); scan();
+            const char *nm = intern(tok_id); scan();
             if (tok==T_IS) {
                 scan(); Expr *body=parse_expr(); expect(T_SEMI);
                 add_branch(nm,0,NULL,body); continue;
             }
-            pushback(); tok=T_ID; strcpy(tok_id,nm);
+            pushback(); tok=T_ID; strcpy(tok_id,nm); tok_id_interned = nm;
         }
 
         Expr *e=parse_expr();
@@ -1832,18 +1928,8 @@ static void run_file(int lib_mode) {
         if (!lib_mode) {
             Val *v=eval(e,NULL);
             /* suppress printing for graphics calls (gopen, gplot, ...) */
-            int is_gfx = (e->tag==E_APP && e->l->tag==E_VAR && e->l->name[0]=='g'
-                && (!strcmp(e->l->name,"gopen")||!strcmp(e->l->name,"gclose")||
-                    !strcmp(e->l->name,"gplot")||!strcmp(e->l->name,"gclear")||
-                    !strcmp(e->l->name,"gloop")||!strcmp(e->l->name,"gsync")||
-                    !strcmp(e->l->name,"gline")||!strcmp(e->l->name,"gcircle")||
-                    !strcmp(e->l->name,"gtext")||!strcmp(e->l->name,"gscale")||
-                    !strcmp(e->l->name,"gpen")||!strcmp(e->l->name,"gblit")||
-                    !strcmp(e->l->name,"gdrawcol")||
-                    !strcmp(e->l->name,"gkeyevent")||
-                    !strcmp(e->l->name,"gbeep")||
-                    !strcmp(e->l->name,"gsave")||
-                    !strcmp(e->l->name,"grestore")));
+            int is_gfx = (e->tag==E_APP && e->l->tag==E_VAR &&
+                          (builtin_flags(e->l->name) & BF_GFX));
             if (!is_gfx) { print_val(v); printf("\n"); }
         }
         continue;
@@ -1852,6 +1938,8 @@ static void run_file(int lib_mode) {
 }
 
 int main(int argc, char **argv) {
+    intern_init();
+    builtin_init();
     volatile int stack_anchor;
     gc_stack_base = (void*)&stack_anchor;
     gc_mark_extra_roots = gc_mark_func_cache;
