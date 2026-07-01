@@ -55,7 +55,7 @@ fun grandchildren x = [c | p <- children x, c <- children p];
 fun grandparents  x = [p | c <- parents x, p <- parents c];
 
 ! sibling(X, Y) :- parent(Z, X), parent(Z, Y), X \= Y.
-fun siblings x = unique [c | p <- parents x, c <- children p, streq(c, x) == 0];
+fun siblings x = unique [c | p <- parents x, c <- children p, not streq(c, x)];
 
 ! ancestor(X, Y) :- parent(X, Y).
 ! ancestor(X, Y) :- parent(X, Z), ancestor(Z, Y).
@@ -98,4 +98,4 @@ write "\n! Disjunction: parent(tom, X) ; parent(bob, X).\n";
 write "?- tom|bob's children:   %v\n" (children "tom" <> children "bob");
 
 write "\n! Negation as failure: parent(tom, X), \\+ male(X).\n";
-write "?- tom's non-male kids:  %v\n" [c | c <- children "tom", male c == 0];
+write "?- tom's non-male kids:  %v\n" [c | c <- children "tom", not (male c)];

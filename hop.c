@@ -316,6 +316,7 @@ enum {
     T_COLON, T_ARROW, T_VALOF, T_FUN, T_IS,
     T_CONS, T_DOTDOT, T_BAR, T_BAR2, T_APPEND,
     T_LBRACKET, T_RBRACKET, T_HASH,
+    T_NOT, T_AND, T_OR,
     T_EOF
 };
 
@@ -402,6 +403,9 @@ static const char *tok_name(int t) {
     case T_DOTDOT: return "'..'";
     case T_BAR: return "'|'";
     case T_BAR2: return "'||'";
+    case T_NOT: return "'not'";
+    case T_AND: return "'and'";
+    case T_OR:  return "'or'";
     case T_APPEND: return "'<>'";
     case T_LBRACKET: return "'['";
     case T_RBRACKET: return "']'";
@@ -453,6 +457,9 @@ static void scan_inner(void) {
         tok_id[i] = 0;
         if (!strcmp(tok_id,"mod")) tok = T_MOD;
         if (!strcmp(tok_id,"fun")) tok = T_FUN;
+        if (!strcmp(tok_id,"not")) tok = T_NOT;
+        if (!strcmp(tok_id,"and")) tok = T_AND;
+        if (!strcmp(tok_id,"or"))  tok = T_OR;
         return;
     }
     switch (ch) {
@@ -538,7 +545,7 @@ static void expect(int t) {
 
 /* ===== AST ===== */
 enum { E_NUM, E_VAR, E_NIL, E_SEC, E_PAIR, E_APP, E_BIN, E_NEG, E_IF,
-       E_WHERE, E_WHEREREC, E_COMP };
+       E_WHERE, E_WHEREREC, E_COMP, E_NOT };
 #define MAX_ARGS 16
 
 struct Expr {
@@ -563,6 +570,7 @@ static Expr *e_sec(int op) { Expr *e=mkexpr(E_SEC); e->op=op; return e; }
 static Expr *e_pair(Expr *a, Expr *b) { Expr *e=mkexpr(E_PAIR); e->l=a; e->r=b; return e; }
 static Expr *e_bin(int op, Expr *l, Expr *r) { Expr *e=mkexpr(E_BIN); e->op=op; e->l=l; e->r=r; return e; }
 static Expr *e_neg(Expr *x) { Expr *e=mkexpr(E_NEG); e->l=x; return e; }
+static Expr *e_not(Expr *x) { Expr *e=mkexpr(E_NOT); e->l=x; return e; }
 static Expr *e_if(Expr *c, Expr *t, Expr *el) { Expr *e=mkexpr(E_IF); e->cond=c; e->then_e=t; e->else_e=el; return e; }
 static Expr *e_app(Expr *fn, Expr **a, int n) {
     Expr *e=mkexpr(E_APP); e->l=fn; e->nargs=n;
@@ -588,6 +596,8 @@ static Pat *p_pair(Pat *a, Pat *b) { Pat *p=ALLOC(Pat); p->tag=P_PAIR; p->fst=a;
 
 /* ===== Parser ===== */
 static Expr *parse_expr(void);
+static Expr *parse_or(void);
+static Expr *parse_and(void);
 static Expr *parse_cons(void);
 static Expr *parse_append(void);
 static Pat *parse_pat(void);
@@ -605,11 +615,11 @@ static Expr *parse_atom(void) {
     if (tok==T_NUM) { Expr *e=e_num(tok_num); scan(); return e; }
     if (tok==T_ID) {
         if (!strcmp(tok_id,"if")) {
-            scan(); Expr *c=parse_cons();
+            scan(); Expr *c=parse_or();
             if (tok!=T_ID||strcmp(tok_id,"then")) die("expected 'then'");
-            scan(); Expr *t=parse_cons();
+            scan(); Expr *t=parse_or();
             if (tok!=T_ID||strcmp(tok_id,"else")) die("expected 'else'");
-            scan(); return e_if(c,t,parse_cons());
+            scan(); return e_if(c,t,parse_or());
         }
         if (!strcmp(tok_id,"nil"))  { scan(); return e_nil(); }
         if (!strcmp(tok_id,"true")) { scan(); return e_num(1); }
@@ -709,6 +719,7 @@ static Expr *parse_app(void) {
 }
 static Expr *parse_unary(void) {
     if (tok==T_MINUS) { scan(); return e_neg(parse_unary()); }
+    if (tok==T_NOT)   { scan(); return e_not(parse_unary()); }
     return parse_app();
 }
 static Expr *parse_mul(void) {
@@ -746,8 +757,18 @@ static Expr *parse_cons(void) {
     if (tok==T_CONS) { scan(); e=e_bin(T_CONS,e,parse_cons()); }
     return e;
 }
+static Expr *parse_and(void) {
+    Expr *e=parse_cons();
+    while (tok==T_AND) { scan(); e=e_bin(T_AND,e,parse_cons()); }
+    return e;
+}
+static Expr *parse_or(void) {
+    Expr *e=parse_and();
+    while (tok==T_OR) { scan(); e=e_bin(T_OR,e,parse_and()); }
+    return e;
+}
 static Expr *parse_expr(void) {
-    Expr *e = parse_cons();
+    Expr *e = parse_or();
     while (tok==T_ID && (!strcmp(tok_id,"where")||!strcmp(tok_id,"whererec"))) {
         int rec = !strcmp(tok_id,"whererec");
         scan();
@@ -1572,6 +1593,8 @@ static Val *eval(Expr *e, Env *env) {
         if (e->op==T_DOTDOT) return builtin_range(eval(e->l,env),eval(e->r,env));
         if (e->op==T_BAR2)   return builtin_zip(eval(e->l,env),eval(e->r,env));
         if (e->op==T_APPEND) return builtin_append(eval(e->l,env),eval(e->r,env));
+        if (e->op==T_AND) { Val *l=force(eval(e->l,env)); return l->num==0 ? vnum(0) : vnum(force(eval(e->r,env))->num!=0); }
+        if (e->op==T_OR)  { Val *l=force(eval(e->l,env)); return l->num!=0 ? vnum(1) : vnum(force(eval(e->r,env))->num!=0); }
         Val *lv=force(eval(e->l,env)), *rv=force(eval(e->r,env));
         double l=lv->num, r=rv->num;
         switch (e->op) {
@@ -1590,6 +1613,7 @@ static Val *eval(Expr *e, Env *env) {
         die("unknown op");
     }
     case E_NEG: return vnum(-force(eval(e->l,env))->num);
+    case E_NOT: return vnum(force(eval(e->l,env))->num!=0 ? 0 : 1);
     case E_IF:  /* TCO: jump to chosen branch */
         e = force(eval(e->cond,env))->num != 0 ? e->then_e : e->else_e;
         continue;

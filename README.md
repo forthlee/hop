@@ -105,13 +105,15 @@ front(5, rows) whererec rows = [1] :: map nextrow rows;
 | Operators | Description |
 |-----------|-------------|
 | `f x` | Function application |
-| `-x` | Unary negation |
+| `-x` `not x` | Unary negation, boolean NOT |
 | `*` `/` `mod` | Multiplicative |
 | `+` `-` | Additive |
 | `..` `\|\|` | Range, zip |
 | `<>` | List append |
 | `==` `!=` `<` `>` `<=` `>=` | Comparison |
 | `::` | Cons (right-associative) |
+| `and` | Boolean AND (short-circuit) |
+| `or` | Boolean OR (short-circuit) |
 | `where` `whererec` | Local bindings |
 
 ### Built-in Functions

@@ -73,6 +73,9 @@ double 21;            ! prints 42
 | `true`      | Boolean true (value `1`)                         |
 | `false`     | Boolean false (value `0`)                        |
 | `mod`       | Modulo operator                                  |
+| `not`       | Boolean NOT (unary)                              |
+| `and`       | Boolean AND (short-circuit)                      |
+| `or`        | Boolean OR (short-circuit)                       |
 
 ### Ignored Declarations
 
@@ -190,13 +193,15 @@ From **highest** to **lowest** precedence:
 | Prec | Operators               | Assoc | Description              |
 |------|-------------------------|-------|--------------------------|
 | 7    | function application    | Left  | `f x y` = `(f x) y`     |
-| 6    | unary `-`               | —     | Negation                 |
+| 6    | unary `-` `not`         | —     | Negation, boolean NOT    |
 | 5    | `*` `/` `mod`           | Left  | Multiplicative           |
 | 4    | `+` `-`                 | Left  | Additive                 |
 | 3    | `..` `\|\|`             | Left  | Range, zip               |
 | 2    | `<>`                    | Left  | List append              |
 | 2    | `==` `!=` `<` `>` `<=` `>=` | None | Comparison          |
 | 1    | `::`                    | Right | Cons (prepend to list)   |
+| 0.5  | `and`                   | Left  | Boolean AND (short-circuit) |
+| 0.2  | `or`                    | Left  | Boolean OR (short-circuit)  |
 | 0    | `where` `whererec`      | Left  | Local bindings           |
 
 ### Sections (Operator as Function)
@@ -239,10 +244,30 @@ Returns `1` (true) or `0` (false). Only works on numbers.
 3 < 5;          ! 1
 ```
 
+### Boolean Operators
+
+`not` (unary), `and`, `or` operate on `0`/`1` values and short-circuit:
+
+```hope
+not 0;                          ! 1
+not 1;                          ! 0
+1 and 0;                        ! 0
+0 or 1;                         ! 1
+x > 0 and x < 10;              ! range check
+x < 0 or x > 100;              ! out-of-range check
+not streq(a, b);                ! string inequality
+```
+
+- `and`: if left is `0`, right is **not evaluated**, returns `0`
+- `or`: if left is non-`0`, right is **not evaluated**, returns `1`
+- `not`: returns `1` if operand is `0`, else `0`
+
 ### Conditional
 
 ```hope
 if n mod 2 == 0 then "even" else "odd";
+if x > 0 and x < 10 then "in range" else "out";
+if x < 0 or x > 100 then "out" else "in";
 ```
 
 Both branches must be present. Only the chosen branch is evaluated (lazy).

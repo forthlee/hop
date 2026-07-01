@@ -16,7 +16,7 @@ fun mk(op, (a,b)) = (2, (op, (a, b)));
 fun expreq((0,a), (0,b)) = a == b;
 --- expreq((1,a), (1,b)) = streq(a, b);
 --- expreq((2,(op1,(a1,b1))), (2,(op2,(a2,b2)))) =
-    if op1 == op2 then if expreq(a1,a2) then expreq(b1,b2) else 0 else 0;
+    if op1 == op2 and expreq(a1,a2) then expreq(b1,b2) else 0;
 --- expreq(_, _) = 0;
 
 ! --- Differentiation ---
