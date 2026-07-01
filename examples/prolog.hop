@@ -25,10 +25,6 @@ fun female_db = ["liz", "ann", "pat"];
 fun elem(_, []) = 0;
 --- elem(x, y :: ys) = if streq(x, y) then 1 else elem(x, ys);
 
-fun remove(_, []) = [];
---- remove(x, y :: ys) =
-    if streq(x, y) then remove(x, ys) else y :: remove(x, ys);
-
 fun unique [] = [];
 --- unique (x :: xs) =
     if elem(x, xs) then unique xs else x :: unique xs;
@@ -55,24 +51,24 @@ fun female x = elem(x, female_db);
 ! ══ Derived rules ══
 
 ! grandparent(X, Z) :- parent(X, Y), parent(Y, Z).
-fun grandchildren x = concatmap children (children x);
-fun grandparents  x = concatmap parents  (parents x);
+fun grandchildren x = [c | p <- children x, c <- children p];
+fun grandparents  x = [p | c <- parents x, p <- parents c];
 
 ! sibling(X, Y) :- parent(Z, X), parent(Z, Y), X \= Y.
-fun siblings x = unique(remove(x, concatmap children (parents x)));
+fun siblings x = unique [c | p <- parents x, c <- children p, streq(c, x) == 0];
 
 ! ancestor(X, Y) :- parent(X, Y).
 ! ancestor(X, Y) :- parent(X, Z), ancestor(Z, Y).
 fun descendants x = children x <> concatmap descendants (children x);
 
 ! uncle_aunt(U, X) :- parent(P, X), sibling(P, U).
-fun uncles_aunts x = unique(concatmap siblings (parents x));
+fun uncles_aunts x = unique [s | p <- parents x, s <- siblings p];
 
 ! brother(X, Y) :- sibling(X, Y), male(X).
-fun brothers x = filter male (siblings x);
+fun brothers x = [s | s <- siblings x, male s];
 
 ! sister(X, Y) :- sibling(X, Y), female(X).
-fun sisters x = filter female (siblings x);
+fun sisters x = [s | s <- siblings x, female s];
 
 ! ══ Queries ══
 
@@ -96,11 +92,10 @@ write "?- brother(liz, X).      %v\n" (brothers "liz");
 write "?- sister(bob, X).       %v\n" (sisters "bob");
 
 write "\n! Conjunction: parent(tom, X), female(X).\n";
-write "?- tom's daughters:      %v\n" (filter female (children "tom"));
+write "?- tom's daughters:      %v\n" [c | c <- children "tom", female c];
 
 write "\n! Disjunction: parent(tom, X) ; parent(bob, X).\n";
 write "?- tom|bob's children:   %v\n" (children "tom" <> children "bob");
 
 write "\n! Negation as failure: parent(tom, X), \\+ male(X).\n";
-fun notmale x = 1 - male x;
-write "?- tom's non-male kids:  %v\n" (filter notmale (children "tom"));
+write "?- tom's non-male kids:  %v\n" [c | c <- children "tom", male c == 0];

@@ -44,14 +44,10 @@ fact 10;    ! 3628800
 **Quicksort:**
 
 ```hope
-fun partition(p, []) = ([], []);
---- partition(p, x :: xs) =
-    if x < p then (x :: fst r, snd r) else (fst r, x :: snd r)
-    where r = partition(p, xs);
-
 fun qsort [] = [];
---- qsort (x :: xs) = qsort(fst p) <> [x] <> qsort(snd p)
-    where p = partition(x, xs);
+--- qsort (pivot :: xs) = qsort lesser <> [pivot] <> qsort greater
+    where greater = [x | x <- xs, x > pivot]
+    where lesser  = [x | x <- xs, x <= pivot];
 
 qsort [3, 1, 4, 1, 5, 9, 2, 6];
 ! [1, 1, 2, 3, 4, 5, 6, 9]

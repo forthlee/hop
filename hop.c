@@ -314,7 +314,7 @@ enum {
     T_LT, T_GT, T_EQ, T_LE, T_GE, T_NE,
     T_LPAREN, T_RPAREN, T_COMMA, T_SEMI,
     T_COLON, T_ARROW, T_VALOF, T_FUN, T_IS,
-    T_CONS, T_DOTDOT, T_BAR2, T_APPEND,
+    T_CONS, T_DOTDOT, T_BAR, T_BAR2, T_APPEND,
     T_LBRACKET, T_RBRACKET, T_HASH,
     T_EOF
 };
@@ -400,6 +400,7 @@ static const char *tok_name(int t) {
     case T_IS: return "'='";
     case T_CONS: return "'::'";
     case T_DOTDOT: return "'..'";
+    case T_BAR: return "'|'";
     case T_BAR2: return "'||'";
     case T_APPEND: return "'<>'";
     case T_LBRACKET: return "'['";
@@ -488,7 +489,7 @@ static void scan_inner(void) {
         die("unexpected '.'");
     case '|': readch();
         if (ch=='|') { readch(); tok=T_BAR2; return; }
-        die("unexpected '|'");
+        tok=T_BAR; return;
     case '>': readch();
         if (ch=='=') { readch(); tok=T_GE; return; }
         tok=T_GT; return;
@@ -537,7 +538,7 @@ static void expect(int t) {
 
 /* ===== AST ===== */
 enum { E_NUM, E_VAR, E_NIL, E_SEC, E_PAIR, E_APP, E_BIN, E_NEG, E_IF,
-       E_WHERE, E_WHEREREC };
+       E_WHERE, E_WHEREREC, E_COMP };
 #define MAX_ARGS 16
 
 struct Expr {
@@ -588,6 +589,7 @@ static Pat *p_pair(Pat *a, Pat *b) { Pat *p=ALLOC(Pat); p->tag=P_PAIR; p->fst=a;
 /* ===== Parser ===== */
 static Expr *parse_expr(void);
 static Expr *parse_cons(void);
+static Expr *parse_append(void);
 static Pat *parse_pat(void);
 
 static int is_atom_start(void) {
@@ -633,6 +635,55 @@ static Expr *parse_atom(void) {
         if (tok==T_RBRACKET) { scan(); return e_nil(); }
         Expr *el[256]; int n=0;
         el[n++]=parse_expr();
+        if (tok==T_BAR) {
+            /* list comprehension: [output | gen1, gen2, ..., guard] */
+            scan(); /* consume '|' */
+            Expr *comp=mkexpr(E_COMP);
+            comp->l=el[0];    /* output expr */
+            comp->r=e_num(1); /* default guard: true */
+            comp->nargs=0;
+            while (1) {
+                if (tok==T_ID) {
+                    char vn[128]; strcpy(vn,tok_id); scan();
+                    if (tok==T_LT) {
+                        scan(); /* consume '<' */
+                        if (tok==T_MINUS) {
+                            /* generator: vn <- range */
+                            scan(); /* consume '-' */
+                            if (comp->nargs+2>MAX_ARGS) die("too many generators");
+                            comp->args[comp->nargs++]=e_var(vn);
+                            comp->args[comp->nargs++]=parse_cons();
+                            if (tok==T_COMMA) { scan(); continue; }
+                            break;
+                        }
+                        /* guard: vn < rhs */
+                        comp->r=e_bin(T_LT,e_var(vn),parse_append());
+                        break;
+                    } else if (tok==T_GT||tok==T_EQ||tok==T_LE||tok==T_GE||tok==T_NE) {
+                        int op=tok; scan();
+                        comp->r=e_bin(op,e_var(vn),parse_append());
+                        break;
+                    } else {
+                        /* function application guard or bare variable */
+                        Expr *gfn=e_var(vn);
+                        Expr *gargs[MAX_ARGS]; int gn=0;
+                        while (is_atom_start()&&gn<MAX_ARGS) gargs[gn++]=parse_atom();
+                        Expr *gexpr=(gn==0)?gfn:e_app(gfn,gargs,gn);
+                        if (tok==T_LT||tok==T_GT||tok==T_EQ||tok==T_LE||tok==T_GE||tok==T_NE) {
+                            int op=tok; scan();
+                            gexpr=e_bin(op,gexpr,parse_append());
+                        }
+                        comp->r=gexpr;
+                        break;
+                    }
+                } else {
+                    comp->r=parse_cons();
+                    break;
+                }
+            }
+            expect(T_RBRACKET);
+            return comp;
+        }
         while (tok==T_COMMA) { scan(); el[n++]=parse_expr(); }
         expect(T_RBRACKET);
         Expr *lst=e_nil();
@@ -1460,6 +1511,28 @@ static Val *call_func(const char *name, Val **args, int nargs) {
     return NULL;
 }
 
+static Val *list_concat(Val *a, Val *b) {
+    a=force(a);
+    if (a->tag==V_NIL) return b;
+    return vcons(a->hd, list_concat(force(a->tl), b));
+}
+static Val *eval_comp(Expr *out, Expr *guard, Expr **gens, int ngens, Env *env);
+static Val *comp_iter(Expr *out, Expr *guard, Expr **gens, int ngens, Env *env, Val *range) {
+    range=force(range);
+    if (range->tag==V_NIL) return val_nil;
+    Env *ne=env_alloc(); ne->name=gens[0]->name; ne->val=range->hd; ne->next=env;
+    Val *head=eval_comp(out, guard, gens+2, ngens-2, ne);
+    Val *tail=comp_iter(out, guard, gens, ngens, env, range->tl);
+    return list_concat(head, tail);
+}
+static Val *eval_comp(Expr *out, Expr *guard, Expr **gens, int ngens, Env *env) {
+    if (ngens==0) {
+        if (force(eval(guard,env))->num!=0) return vcons(eval(out,env), val_nil);
+        return val_nil;
+    }
+    return comp_iter(out, guard, gens, ngens, env, force(eval(gens[1],env)));
+}
+
 static Val *eval(Expr *e, Env *env) {
   for (;;) {
     tok_line = e->line; tok_col = e->col; src_file = e->file;
@@ -1552,6 +1625,8 @@ static Val *eval(Expr *e, Env *env) {
         thunk->thunk_env = ne;
         e = e->l; env = ne; continue;
     }
+    case E_COMP:
+        return eval_comp(e->l, e->r, e->args, e->nargs, env);
     }
     die("unknown expr tag"); return NULL;
   }

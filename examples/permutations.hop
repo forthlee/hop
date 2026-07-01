@@ -1,5 +1,4 @@
-fun mapCons(x, nil)    = nil;
---- mapCons(x, h :: t) = (x :: h) :: mapCons(x, t);
+fun mapCons(x, lst) = [x :: h | h <- lst];
 
 fun pickEach nil      = nil;
 --- pickEach(h :: t)  = (h, t) :: mapConsPairs(h, pickEach t);

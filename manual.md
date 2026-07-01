@@ -1066,21 +1066,31 @@ would be redundant complexity.
 
 ### 19.3 List Comprehensions
 
-Hope supports `[f x | x <- xs, p x]`. Hop has no comprehension syntax.
-
-**Workaround:** use `map` and `filter` from `lib.hop`.
+Hop supports list comprehension syntax compatible with Hope:
 
 ```hope
-uses lib;
-! [x * x | x <- 1..10, odd x]  — not valid in hop
-map (\x -> x * x) (filter odd (1..10));   ! also invalid (lambda)
-
-fun sq x = x * x;
-map sq (filter odd (1..10));              ! OK
+[x * x | x <- 1..10, odd x]          ! [1, 9, 25, 49, 81]
+[(x, y) | x <- 1..3, y <- 1..3, x != y]
 ```
 
-**Why absent:** comprehensions are syntactic sugar over `map`/`filter`/
-`concatMap`, which are already available in the standard library.
+**Syntax:** `[output | gen1, gen2, ..., guard]`
+
+- **Generator:** `var <- range` — iterates `var` over a list or range.
+- **Guard:** a boolean expression after the last generator (optional).
+- Multiple generators produce the Cartesian product, filtered by the guard.
+- Up to 7 generators are supported.
+
+**Example — qsort:**
+
+```hope
+fun qsort [] = [];
+--- qsort (pivot :: xs) = qsort lesser <> [pivot] <> qsort greater
+    where greater = [x | x <- xs, x > pivot]
+    where lesser  = [x | x <- xs, x <= pivot];
+```
+
+**Limitation:** a guard of the form `var < -expr` (less-than applied to a
+negated value) is parsed as a generator. Rewrite as `var < (0 - expr)`.
 
 ### 19.4 Tuples Beyond Pairs
 

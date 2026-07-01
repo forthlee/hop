@@ -1,16 +1,9 @@
 ! qsort.hop — Quicksort
 
-fun fst (a, _) = a;
-fun snd (_, b) = b;
-
-fun partition(p, []) = ([], []);
---- partition(p, x :: xs) =
-    if x < p then (x :: fst r, snd r) else (fst r, x :: snd r)
-    where r = partition(p, xs);
-
 fun qsort [] = [];
---- qsort (x :: xs) = qsort(fst p) <> [x] <> qsort(snd p)
-    where p = partition(x, xs);
+--- qsort (pivot :: xs) = qsort lesser <> [pivot] <> qsort greater
+    where greater = [x | x <- xs, x > pivot]
+    where lesser  = [x | x <- xs, x <= pivot];
 
 write "qsort [3,1,4,1,5,9,2,6]: ";
 qsort [3, 1, 4, 1, 5, 9, 2, 6];
