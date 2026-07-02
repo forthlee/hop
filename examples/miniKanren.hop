@@ -1,4 +1,4 @@
-! miniKanren.hop — A miniKanren logic programming system in hop-0
+! miniKanren.hop — A miniKanren logic programming system in hop
 !
 ! Implements µKanren: unification, conjunction, disjunction,
 ! interleaving streams, relation calls with fresh variables.
@@ -40,7 +40,7 @@ fun mkNum n = (2, n);
 fun mkPair(a, b) = (3, (a, b));
 fun mkNil = (4, 0);
 
-! llist: convert a hop list of terms into a logic list
+! llist: convert a list of terms into a logic list
 fun llist [] = mkNil;
 --- llist (t :: ts) = mkPair(t, llist ts);
 
