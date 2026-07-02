@@ -1,5 +1,3 @@
-! uses lists, range;
-
 n = 10;
 
 lst = 1::1::map (+) (1..n || 2..n+1);
