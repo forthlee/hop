@@ -1658,7 +1658,7 @@ static Val *eval(Expr *e, Env *env) {
     case E_NIL: return val_nil;
     case E_SEC: return vsec(e->op);
     case E_VAR: return env_lookup(e->name,env);
-    case E_PAIR: return vpair(eval(e->l,env), eval(e->r,env));
+    case E_PAIR: { Val *a=eval(e->l,env); Val *b=eval(e->r,env); return vpair(a,b); }
     case E_APP: {
         Val *fn=eval(e->l,env);
         Val *args[MAX_ARGS];

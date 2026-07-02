@@ -1,0 +1,339 @@
+! miniKanren.hop — A miniKanren logic programming system in hop-0
+!
+! Implements µKanren: unification, conjunction, disjunction,
+! interleaving streams, relation calls with fresh variables.
+! Includes appendo and membero relations with demos.
+!
+! Design notes:
+!   Terms and goals use tagged-pair encoding (no algebraic types).
+!   Goals are data structures interpreted by evalGoal.
+!   Relations are functions: (termArgs, counter) -> (goal, newCounter).
+!   Streams are lazy lists of states with suspension markers (0 :: thunk)
+!     to avoid eager evaluation of infinite branches.
+!   No occurs check (standard µKanren omits it).
+
+uses lib;
+
+! ============================================================
+!  Utility: Number to String
+! ============================================================
+
+fun digitCh d = d + 48;
+fun showNatH(0, acc) = acc;
+--- showNatH(n, acc) = showNatH(intdiv(n, 10), digitCh(n mod 10) :: acc);
+fun showNat 0 = [48];
+--- showNat n = showNatH(n, []);
+fun showInt n = if n < 0 then [45] <> showNat(0 - n) else showNat n;
+
+! ============================================================
+!  Terms
+!  Var(id)    = (0, id)      — logic variable
+!  Sym(name)  = (1, name)    — symbol (char-code list)
+!  Num(n)     = (2, n)       — number
+!  Pair(a,b)  = (3, (a, b))  — pair / cons
+!  Nil        = (4, 0)       — nil / empty list
+! ============================================================
+
+fun mkVar id = (0, id);
+fun mkSym s = (1, s);
+fun mkNum n = (2, n);
+fun mkPair(a, b) = (3, (a, b));
+fun mkNil = (4, 0);
+
+! llist: convert a hop list of terms into a logic list
+fun llist [] = mkNil;
+--- llist (t :: ts) = mkPair(t, llist ts);
+
+! ============================================================
+!  Goals (tags 10–15, distinct from term tags 0–4)
+!  Eq(t1, t2)         = (10, (t1, t2))
+!  Conj(g1, g2)       = (11, (g1, g2))
+!  Disj(g1, g2)       = (12, (g1, g2))
+!  Succeed            = (13, 0)
+!  Fail               = (14, 0)
+!  CallRel(fn, args)  = (15, (fn, args))
+! ============================================================
+
+fun gEq(t1, t2) = (10, (t1, t2));
+fun gConj(g1, g2) = (11, (g1, g2));
+fun gDisj(g1, g2) = (12, (g1, g2));
+fun gSucceed = (13, 0);
+fun gFail = (14, 0);
+fun gCallRel(fn, args) = (15, (fn, args));
+
+! conjAll: conjunction of a list of goals
+fun conjAll [] = gSucceed;
+--- conjAll (g :: []) = g;
+--- conjAll (g :: gs) = gConj(g, conjAll gs);
+
+! conde: disjunction of conjunctions
+fun conde [] = gFail;
+--- conde (gs :: []) = conjAll gs;
+--- conde (gs :: rest) = gDisj(conjAll gs, conde rest);
+
+! ============================================================
+!  Substitution and Walking
+!  Substitution = association list [(varId, term), ...]
+! ============================================================
+
+! walk: follow variable chains in substitution
+fun walk((0, id), s) = walkLookup(id, (s, s));
+--- walk(t, _) = t;
+
+fun walkLookup(id, ([], _)) = mkVar id;
+--- walkLookup(id, ((vid, val) :: rest, fullS)) =
+    if id == vid then walk(val, fullS)
+    else walkLookup(id, (rest, fullS));
+
+! ============================================================
+!  Unification
+!  Returns [newSubst] on success, [] on failure.
+! ============================================================
+
+fun unify(t1, t2, s) =
+    unifyW(walk(t1, s), (walk(t2, s), s));
+
+! Both variables
+fun unifyW((0, id1), ((0, id2), s)) =
+    if id1 == id2 then [s] else [(id1, (0, id2)) :: s];
+! One variable
+--- unifyW((0, id), (t, s)) = [(id, t) :: s];
+--- unifyW(t, ((0, id), s)) = [(id, t) :: s];
+! Symbols
+--- unifyW((1, a), ((1, b), s)) =
+    if streq(a, b) then [s] else [];
+! Numbers
+--- unifyW((2, a), ((2, b), s)) =
+    if a == b then [s] else [];
+! Pairs: unify components
+--- unifyW((3, (a1, a2)), ((3, (b1, b2)), s)) =
+    unifyPair(unify(a1, (b1, s)), (a2, b2));
+! Nils
+--- unifyW((4, _), ((4, _), s)) = [s];
+! Mismatch
+--- unifyW(_, (_, _)) = [];
+
+fun unifyPair([], _) = [];
+--- unifyPair(s2 :: _, (a2, b2)) = unify(a2, (b2, s2));
+
+! ============================================================
+!  Streams and Goal Evaluation
+!  State = (substitution, counter)
+!  Stream = lazy list of states
+! ============================================================
+
+! Streams use suspensions for laziness: 0 :: thunk marks a delayed
+! computation.  States are pairs (subst, counter), so 0 (a number)
+! is unambiguous as a suspension marker.
+
+! mplus: interleaving merge of two streams
+fun mplus([], s2) = s2;
+--- mplus(0 :: ss, s2) = 0 :: mplus(s2, ss);
+--- mplus(s1 :: ss, s2) = s1 :: mplus(s2, ss);
+
+! bind: flatMap a goal over a stream (for conjunction)
+fun bind([], _) = [];
+--- bind(0 :: ss, g) = 0 :: bind(ss, g);
+--- bind(st :: sts, g) = mplus(evalGoal(g, st), 0 :: bind(sts, g));
+
+! pullAll: strip suspensions from stream (lazily)
+fun pullAll [] = [];
+--- pullAll (0 :: s) = pullAll s;
+--- pullAll (x :: xs) = x :: pullAll xs;
+
+! evalGoal: goal × state → stream of states
+fun evalGoal((10, (t1, t2)), (s, c)) =
+    eqResult(unify(t1, (t2, s)), c);
+--- evalGoal((11, (g1, g2)), st) =
+    bind(evalGoal(g1, st), g2);
+--- evalGoal((12, (g1, g2)), st) =
+    mplus(evalGoal(g1, st), 0 :: evalGoal(g2, st));
+--- evalGoal((13, _), st) = [st];
+--- evalGoal((14, _), _) = [];
+--- evalGoal((15, (fn, termArgs)), (s, c)) =
+    callRelH(fn (termArgs, c), s);
+
+fun eqResult([], _) = [];
+--- eqResult(s2 :: _, c) = [(s2, c)];
+
+fun callRelH((g, c2), s) = evalGoal(g, (s, c2));
+
+! ============================================================
+!  Reification and Display
+! ============================================================
+
+! walkStar: recursively walk into term structure
+fun walkStar(t, s) = walkStarH(walk(t, s), s);
+
+fun walkStarH((3, (a, b)), s) = mkPair(walkStar(a, s), walkStar(b, s));
+--- walkStarH(t, _) = t;
+
+! isLList: is term a proper logic list (ending in Nil)?
+fun isLList (4, _) = 1;
+--- isLList (3, (_, b)) = isLList b;
+--- isLList _ = 0;
+
+! showResult: term → string (char-code list)
+fun showResult (4, _) = "[]";
+--- showResult (0, id) = "_." <> showNat id;
+--- showResult (1, name) = name;
+--- showResult (2, n) = showInt n;
+--- showResult (3, (a, b)) =
+    if isLList (3, (a, b))
+    then "[" <> showLItems (3, (a, b)) <> "]"
+    else "(" <> showResult a <> " . " <> showResult b <> ")";
+--- showResult _ = "??";
+
+fun showLItems (3, (a, (4, _))) = showResult a;
+--- showLItems (3, (a, rest)) = showResult a <> ", " <> showLItems rest;
+
+! showResults: list of terms → formatted string
+fun showResults [] = "  (none)";
+--- showResults (t :: []) = "  " <> showResult t;
+--- showResults (t :: ts) = "  " <> showResult t <> "\n" <> showResults ts;
+
+! showPairResults: list of (term, term) pairs → formatted string
+fun showPairResults [] = "  (none)";
+--- showPairResults ((a, b) :: []) =
+    "  (" <> showResult a <> ", " <> showResult b <> ")";
+--- showPairResults ((a, b) :: ts) =
+    "  (" <> showResult a <> ", " <> showResult b <> ")\n"
+    <> showPairResults ts;
+
+! ============================================================
+!  Run Interface
+! ============================================================
+
+! run(n, nq, goal): evaluate goal, reify var 0, take first n
+!   nq = number of query variables (initial counter)
+fun run(n, nq, goal) =
+    front(n, reifyStream(pullAll(evalGoal(goal, ([], nq)))));
+
+fun reifyStream [] = [];
+--- reifyStream ((s, _) :: rest) =
+    walkStar(mkVar 0, s) :: reifyStream rest;
+
+! run2: like run but reifies both var 0 and var 1 as a pair
+fun run2(n, nq, goal) =
+    front(n, reifyStream2(pullAll(evalGoal(goal, ([], nq)))));
+
+fun reifyStream2 [] = [];
+--- reifyStream2 ((s, _) :: rest) =
+    (walkStar(mkVar 0, s), walkStar(mkVar 1, s)) :: reifyStream2 rest;
+
+! ============================================================
+!  Relations
+!  A relation: (termArgs, counter) → (goal, newCounter)
+!  termArgs is a nested pair of logic terms.
+!  The relation allocates fresh vars from counter.
+! ============================================================
+
+! appendo(l, s, out): append l and s to get out
+fun appendo((l, (s, out)), c) =
+    (conde [
+        [gEq(l, mkNil), gEq(s, out)],
+        [gEq(l, mkPair(a, d)),
+         gEq(out, mkPair(a, res)),
+         gCallRel(appendo, (d, (s, res)))]
+    ], c + 3)
+    where a = mkVar c
+    where d = mkVar (c + 1)
+    where res = mkVar (c + 2);
+
+! membero(x, l): x is a member of logic list l
+fun membero((x, l), c) =
+    (gConj(gEq(l, mkPair(h, t)),
+        gDisj(
+            gEq(x, h),
+            gCallRel(membero, (x, t)))),
+    c + 2)
+    where h = mkVar c
+    where t = mkVar (c + 1);
+
+! ============================================================
+!  Demos
+! ============================================================
+
+write "=== miniKanren in hop-0 ===\n";
+
+! --- 1. Simple unification: run* (q) (== q 5) ---
+write "\n--- 1. Simple unification ---\n";
+write "run* (q) (== q 5):\n%s\n"
+    (showResults (run(10, (1, gEq(mkVar 0, mkNum 5)))));
+
+! --- 2. Disjunction: run* (q) (conde [(== q 1)] [(== q 2)] [(== q 3)]) ---
+write "\n--- 2. Disjunction (conde) ---\n";
+write "run* (q) (conde [[== q 1], [== q 2], [== q 3]]):\n%s\n"
+    (showResults (run(10, (1,
+        conde [
+            [gEq(mkVar 0, mkNum 1)],
+            [gEq(mkVar 0, mkNum 2)],
+            [gEq(mkVar 0, mkNum 3)]
+        ]))));
+
+! --- 3. Conjunction: run* (q) (== q 5) (== q 5) ---
+write "\n--- 3. Conjunction ---\n";
+write "run* (q) (== q 5, == q 5):\n%s\n"
+    (showResults (run(10, (1,
+        gConj(gEq(mkVar 0, mkNum 5), gEq(mkVar 0, mkNum 5))))));
+
+write "run* (q) (== q 5, == q 6) [should fail]:\n%s\n"
+    (showResults (run(10, (1,
+        gConj(gEq(mkVar 0, mkNum 5), gEq(mkVar 0, mkNum 6))))));
+
+! --- 4. appendo forward ---
+write "\n--- 4. appendo forward ---\n";
+write "appendo([1,2], [3,4], q):\n%s\n"
+    (showResults (run(10, (1,
+        gCallRel(appendo, (llist [mkNum 1, mkNum 2],
+                          (llist [mkNum 3, mkNum 4], mkVar 0)))))));
+
+! --- 5. appendo backward: all ways to split [1,2,3] ---
+write "\n--- 5. appendo backward ---\n";
+write "appendo(q, r, [1,2,3]) — all splits:\n%s\n"
+    (showPairResults (run2(10, (2,
+        gCallRel(appendo, (mkVar 0,
+                          (mkVar 1,
+                           llist [mkNum 1, mkNum 2, mkNum 3])))))));
+
+! --- 6. membero ---
+write "\n--- 6. membero ---\n";
+write "membero(q, [a, b, c]):\n%s\n"
+    (showResults (run(10, (1,
+        gCallRel(membero, (mkVar 0,
+                           llist [mkSym "a", mkSym "b", mkSym "c"]))))));
+
+! --- 7. membero check ---
+write "\n--- 7. membero check ---\n";
+write "membero(b, [a, b, c]) — succeeds?:\n%s\n"
+    (showResults (run(1, (1,
+        gConj(gEq(mkVar 0, mkSym "yes"),
+              gCallRel(membero, (mkSym "b",
+                                 llist [mkSym "a", mkSym "b", mkSym "c"])))))));
+
+write "membero(d, [a, b, c]) — succeeds?:\n%s\n"
+    (showResults (run(1, (1,
+        gConj(gEq(mkVar 0, mkSym "yes"),
+              gCallRel(membero, (mkSym "d",
+                                 llist [mkSym "a", mkSym "b", mkSym "c"])))))));
+
+! --- 8. Fresh variables in results ---
+write "\n--- 8. Fresh variables ---\n";
+write "appendo(q, r, [1,2]) with only q shown:\n%s\n"
+    (showResults (run(10, (2,
+        gCallRel(appendo, (mkVar 0,
+                          (mkVar 1,
+                           llist [mkNum 1, mkNum 2])))))));
+
+! --- 9. Nested appendo ---
+write "\n--- 9. Nested appendo ---\n";
+write "appendo(q, [3], r), appendo(r, [4], [1,2,3,4]):\n%s\n"
+    (showPairResults (run2(1, (2,
+        conjAll [
+            gCallRel(appendo, (mkVar 0, (llist [mkNum 3], mkVar 1))),
+            gCallRel(appendo, (mkVar 1,
+                              (llist [mkNum 4],
+                               llist [mkNum 1, mkNum 2, mkNum 3, mkNum 4])))
+        ]))));
+
+write "\nDone.\n";
